@@ -2007,7 +2007,7 @@ function drawMinimap() {
   const fg = mctx.createRadialGradient(0, 0, 0, 0, 0, 60); fg.addColorStop(0, 'rgba(255,255,255,.28)'); fg.addColorStop(1, 'rgba(255,255,255,0)');
   mctx.fillStyle = fg; mctx.beginPath(); mctx.moveTo(0, 0); mctx.arc(0, 0, 60, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55); mctx.closePath(); mctx.fill(); mctx.restore();
   const mk = (x, z) => [(x - P.x) * k + W / 2, (z - P.z) * k + W / 2];
-  drawPlanePath(mctx, mk, 1.5); drawDropMarks(mctx, mk, 7);
+  drawCarMarks(mctx, mk, 4.5); drawPlanePath(mctx, mk, 1.5); drawDropMarks(mctx, mk, 7);
   drawArrow(mctx, W / 2, W / 2, -P.charYaw, 8);
 }
 const bigmap = $('bigmap'), bctx = bigmap.getContext('2d');
@@ -2030,7 +2030,7 @@ function drawBigMap() {
   bctx.font = `italic ${Math.round(S / 46)}px "Noto Sans KR"`; bctx.fillStyle = '#cfe6f2'; bctx.strokeStyle = 'rgba(0,0,0,.5)'; bctx.lineWidth = 3;
   bctx.strokeText('요단강', (-200 + HALF) * k, (225 + HALF) * k); bctx.fillText('요단강', (-200 + HALF) * k, (225 + HALF) * k);
   const bk = (x, z) => [(x + HALF) * k, (z + HALF) * k];
-  drawPlanePath(bctx, bk, 2); drawDropMarks(bctx, bk, 10);
+  drawCarMarks(bctx, bk, 4); drawPlanePath(bctx, bk, 2); drawDropMarks(bctx, bk, 10);
   drawArrow(bctx, (P.x + HALF) * k, (P.z + HALF) * k, -P.charYaw, 11);
 }
 
@@ -2120,7 +2120,7 @@ const FBV = '10.14.1';
 const NET = { ok: false, fb: null, db: null, uid: null, offset: 0, room: null, phase: 'none', round: 0, startAt: 0, players: {}, remotes: new Map(), joined: false, joinAt: 0, sendT: 0, lastSent: '', kickSeen: 0 };
 const serverNow = () => Date.now() + NET.offset;
 const WATCH = new URLSearchParams(location.search).has('watch');
-if (new URLSearchParams(location.search).has('debug')) setTimeout(() => (window.PBG = { P, CARS3, DROPS, state, cam, action, items }), 0);
+if (new URLSearchParams(location.search).has('debug')) setTimeout(() => (window.PBG = { P, CARS3, DROPS, state, cam, action, items, NET, boardPlane, makePlanePath, serverNow, leavePodium }), 0);
 async function initNet() {
   try {
     const [app, auth, db] = await Promise.all([
@@ -2427,23 +2427,69 @@ function planeAt(t) {
 }
 // 아직 섬 위를 다 지나가지 않았으면 탑승 가능
 function planeBoardable() { if (!planeOn()) return false; const p = planeAt(planeT()); return p.s < p.L * 0.5 + 500; }
+// 수송기 (C-130 느낌: 높은 날개, 프로펠러 4개, 위로 올라간 꼬리, 큰 수직 꼬리날개, 끌고 가는 현수막)
+function planeSkin() {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d'), r = mulberry32(55);
+  x.fillStyle = '#80868a'; x.fillRect(0, 0, 512, 256);
+  for (let i = 0; i < 900; i++) { const v = 118 + r() * 24 | 0; x.fillStyle = `rgba(${v},${v + 4},${v + 8},.25)`; x.fillRect(r() * 512, r() * 256, 4 + r() * 30, 2 + r() * 10); }
+  x.strokeStyle = 'rgba(40,44,48,.35)'; x.lineWidth = 1.5;
+  for (let u = 0; u < 512; u += 32) { x.beginPath(); x.moveTo(u, 0); x.lineTo(u, 256); x.stroke(); }
+  for (let v = 0; v < 256; v += 64) { x.beginPath(); x.moveTo(0, v); x.lineTo(512, v); x.stroke(); }
+  x.fillStyle = 'rgba(30,30,30,.5)'; for (let u = 6; u < 512; u += 11) for (let v = 4; v < 256; v += 32) x.fillRect(u, v, 1.5, 1.5); // 리벳
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 1); t.anisotropy = 4; return t;
+}
+function bannerTex() {
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 256; const x = cv.getContext('2d');
+  x.fillStyle = '#141014'; x.fillRect(0, 0, 1024, 256);
+  x.fillStyle = '#ff4fa3'; x.fillRect(0, 0, 1024, 16); x.fillRect(0, 240, 1024, 16);
+  x.font = '96px "Black Han Sans", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#ff6fb5'; x.fillText('주기도문 배틀그라운드', 512, 108);
+  x.font = '500 54px Teko, sans-serif'; x.fillStyle = '#f2a900'; x.fillText("THE LORD'S PRAYER", 512, 196);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
 function buildPlaneMesh() {
-  const g = new THREE.Group(), body = M3(0x5f6853, { roughness: 0.5, metalness: 0.35 }), dark = M3(0x2a2d29, { roughness: 0.7 }), glass = M3(0x1c2a38, { roughness: 0.15, metalness: 0.7 }), yel = M3(0xf2a900, { roughness: 0.5 });
+  const g = new THREE.Group(), skin = planeSkin();
+  const body = M3(0xffffff, { map: skin, roughness: 0.55, metalness: 0.35 }), dark = M3(0x1b1d1f, { roughness: 0.5, metalness: 0.3 }), glass = M3(0x0d1418, { roughness: 0.1, metalness: 0.8 }), grey = M3(0x6e7478, { roughness: 0.6, metalness: 0.35 });
   const add = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); g.add(o); return o; };
-  add(new THREE.CylinderGeometry(2.2, 2.2, 20, 18), body, 0, 0, 0, Math.PI / 2);
-  add(new THREE.SphereGeometry(2.2, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), body, 0, 0, 10, Math.PI / 2);
-  add(new THREE.CylinderGeometry(2.2, 0.55, 9, 18), body, 0, 0.6, -14.5, Math.PI / 2);
-  add(new THREE.BoxGeometry(2.4, 0.8, 1.6), glass, 0, 1.15, 10.4, -0.5);
-  add(new THREE.BoxGeometry(34, 0.45, 4.4), body, 0, 1.3, 1.2);
-  add(new THREE.BoxGeometry(12, 0.3, 2.6), body, 0, 1.4, -17.6);
-  add(new THREE.BoxGeometry(0.35, 5.2, 3.4), body, 0, 3.6, -17.4);
-  add(new THREE.BoxGeometry(0.4, 1.2, 1.2), yel, 0, 5.6, -17.9);
-  for (const x of [-6.8, -12.2, 6.8, 12.2]) {
-    add(new THREE.CylinderGeometry(0.8, 0.7, 4, 12), dark, x, 0.9, 2.4, Math.PI / 2);
-    const pr = new THREE.Group(); pr.position.set(x, 0.9, 4.5); g.add(pr);
-    for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.9, 0.06), dark); b.position.y = 0.95; const h = new THREE.Group(); h.rotation.z = k * Math.PI / 2; h.add(b); pr.add(h); }
+  // 동체 (앞이 +z)
+  add(new THREE.CylinderGeometry(2.25, 2.25, 22, 24), body, 0, 0, 0, Math.PI / 2);
+  const nose = add(new THREE.SphereGeometry(2.25, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), body, 0, 0, 11, Math.PI / 2); nose.scale.set(1, 1.25, 0.95);
+  const dome = add(new THREE.SphereGeometry(1.05, 18, 12), dark, 0, -0.45, 13.35); dome.scale.set(1, 0.95, 0.75); // 검은 기수 레이돔
+  // 조종석 창문
+  for (const [x, ry] of [[-0.62, 0.32], [0, 0], [0.62, -0.32]]) add(new THREE.BoxGeometry(0.55, 0.42, 0.08), glass, x, 1.25, 12.25 - Math.abs(x) * 0.25, -0.55, ry);
+  for (const sx of [-1, 1]) { add(new THREE.BoxGeometry(0.08, 0.45, 0.55), glass, sx * 1.75, 1.05, 11.5); add(new THREE.BoxGeometry(0.08, 0.38, 0.4), glass, sx * 2.2, 0.1, 9.6); }
+  // 위로 올라가는 꼬리 동체
+  const tail = new THREE.CylinderGeometry(2.25, 0.55, 11, 24, 6); tail.rotateX(Math.PI / 2); tail.translate(0, 0, -5.5);
+  { const p = tail.attributes.position; for (let i = 0; i < p.count; i++) { const t = -p.getZ(i) / 11; p.setY(i, p.getY(i) + t * t * 1.6 + (p.getY(i) < 0 ? t * 1.1 : 0)); } tail.computeVertexNormals(); }
+  add(tail, body, 0, 0, -11);
+  // 바퀴 덮개(동체 옆 아래)
+  for (const sx of [-1, 1]) { const sp = add(new THREE.CapsuleGeometry(0.75, 5, 6, 12), grey, sx * 2.05, -1.55, 0.5, Math.PI / 2); sp.scale.set(1, 1, 0.8); }
+  // 높은 주날개
+  const wing = new THREE.BoxGeometry(41, 0.55, 4.4, 20, 1, 1);
+  { const p = wing.attributes.position; for (let i = 0; i < p.count; i++) { const k = Math.abs(p.getX(i)) / 20.5; p.setZ(i, p.getZ(i) * (1 - 0.45 * k) - k * 0.6); p.setY(i, p.getY(i) * (1 - 0.4 * k) + k * 0.35); } wing.computeVertexNormals(); }
+  add(wing, body, 0, 2.35, 1.6);
+  add(new THREE.BoxGeometry(4.6, 0.9, 5), body, 0, 1.95, 1.6); // 날개 뿌리
+  // 엔진 4개 + 프로펠러
+  for (const x of [-6.2, -11.8, 6.2, 11.8]) {
+    add(new THREE.CylinderGeometry(0.72, 0.62, 5.2, 14), grey, x, 1.75, 3.0, Math.PI / 2);
+    add(new THREE.SphereGeometry(0.42, 12, 8), dark, x, 1.75, 5.75);
+    const pr = new THREE.Group(); pr.position.set(x, 1.75, 5.8); g.add(pr);
+    for (let k = 0; k < 4; k++) { const bl = new THREE.Mesh(new THREE.BoxGeometry(0.28, 2.1, 0.05), dark); bl.position.y = 1.05; const h = new THREE.Group(); h.rotation.z = k * Math.PI / 2; h.add(bl); pr.add(h); }
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(2.2, 28), new THREE.MeshBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false })); disc.position.set(x, 1.75, 5.85); g.add(disc);
     PLANE.props.push(pr);
   }
+  // 수직 꼬리날개 (뒤로 젖혀진 사다리꼴)
+  const fs = new THREE.Shape(); fs.moveTo(0, 0); fs.lineTo(-7.2, 0); fs.lineTo(-8.6, 8.2); fs.lineTo(-5.2, 8.2); fs.closePath();
+  const fin = new THREE.ExtrudeGeometry(fs, { depth: 0.35, bevelEnabled: false }); fin.translate(0, 0, -0.175); fin.rotateY(Math.PI / 2);
+  add(fin, body, 0, 1.2, -14.2);
+  // 수평 꼬리날개
+  const hs = new THREE.BoxGeometry(15, 0.3, 3.2, 8, 1, 1);
+  { const p = hs.attributes.position; for (let i = 0; i < p.count; i++) { const k = Math.abs(p.getX(i)) / 7.5; p.setZ(i, p.getZ(i) * (1 - 0.4 * k) - k * 0.8); } }
+  add(hs, body, 0, 1.75, -19.5);
+  // 끌고 가는 현수막
+  const ban = add(new THREE.PlaneGeometry(11, 2.75), new THREE.MeshBasicMaterial({ map: bannerTex(), side: THREE.DoubleSide, fog: true }), 0, 0.6, -34);
+  ban.rotation.y = Math.PI / 2; PLANE.banner = ban;
+  const lv = [0, 1.9, -21, 0, 1.95, -28.5, 0, 1.9, -21, 0, -0.75, -28.5];
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lv, 3)); g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x333333 })));
   g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   g.visible = false; scene.add(g); PLANE.mesh = g;
 }
@@ -2453,6 +2499,7 @@ function updatePlaneVis(dt) {
   PLANE.mesh.visible = vis; if (!vis) return;
   PLANE.mesh.position.set(p.x, p.y, p.z); PLANE.mesh.rotation.y = p.yaw;
   for (const pr of PLANE.props) pr.rotation.z += dt * 45;
+  if (PLANE.banner) PLANE.banner.position.x = Math.sin(performance.now() / 700) * 0.4;
 }
 function boardPlane() {
   P.mode = 'plane'; P.vy = 0; P.vx = P.vz = 0; P.grounded = false; P.car = null; setStance('stand');
@@ -2523,7 +2570,44 @@ function makeChute(top = 5.2, target = 1.5) {
   const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.add(new THREE.LineSegments(lg, A.line));
   g.visible = false; return g;
 }
-function setChute(S, on) { if (!on && !S.chute) return; if (!S.chute) { S.chute = makeChute(); S.root.add(S.chute); } S.chute.visible = on; }
+let WING = null;
+function wingChuteAssets() {
+  if (WING) return WING;
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 256; const x = cv.getContext('2d'), r = mulberry32(91);
+  x.fillStyle = '#7a5434'; x.fillRect(0, 0, 1024, 256);
+  // 호랑이 무늬 위장
+  for (let i = 0; i < 70; i++) {
+    const y0 = r() * 256, x0 = r() * 1024, w = 40 + r() * 140, h = 6 + r() * 14, c = ['#3b2414', '#4a2e18', '#a77a4c', '#8d6238', '#2c1a0e'][i % 5];
+    x.fillStyle = c; x.beginPath(); x.moveTo(x0, y0);
+    x.bezierCurveTo(x0 + w * 0.3, y0 - h, x0 + w * 0.7, y0 + h, x0 + w, y0 + (r() - 0.5) * 20);
+    x.bezierCurveTo(x0 + w * 0.7, y0 + h * 1.8, x0 + w * 0.3, y0 + h * 0.4, x0, y0 + h); x.fill();
+  }
+  for (let u = 0; u < 1024; u += 85) { x.fillStyle = 'rgba(0,0,0,.22)'; x.fillRect(u, 0, 3, 256); } // 셀 이음매
+  x.font = 'italic 900 112px "Noto Sans KR", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.lineJoin = 'round'; x.lineWidth = 16; x.strokeStyle = '#000'; x.strokeText("The Lord's Prayer", 512, 132);
+  x.fillStyle = '#ffe21a'; x.fillText("The Lord's Prayer", 512, 132);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  // 활처럼 휜 사각 날개: 상자를 만들어 좌우로 구부림
+  const R = 6.2, geo = new THREE.BoxGeometry(8.6, 0.5, 3.0, 32, 1, 6), p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const bx = p.getX(i), by = p.getY(i), bz = p.getZ(i), th = bx / R, prof = 0.55 + 0.45 * Math.cos((bz / 1.5 + 0.35) * 1.4); // 앞쪽(-z)이 두꺼운 날개꼴
+    const rr = R + by * prof; p.setXYZ(i, Math.sin(th) * rr, Math.cos(th) * rr - R, bz);
+  }
+  geo.computeVertexNormals();
+  WING = { geo, mat: new THREE.MeshStandardMaterial({ map: t, side: THREE.DoubleSide, roughness: 0.9 }), line: new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.7 }) };
+  return WING;
+}
+function makeWingChute() {
+  const A = wingChuteAssets(), g = new THREE.Group(), m = new THREE.Mesh(A.geo, A.mat), top = 6.4; m.position.y = top; m.castShadow = true; g.add(m);
+  const v = [], R = 6.2;
+  for (let k = 0; k <= 6; k++) for (const bz of [-1.2, 1.2]) {
+    const bx = -4.1 + k * 8.2 / 6, th = bx / R, rr = R - 0.25;
+    v.push(Math.sin(th) * rr, top + Math.cos(th) * rr - R, bz, Math.sign(bx) * 0.22, 1.45, bz > 0 ? 0.12 : -0.05);
+  }
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.add(new THREE.LineSegments(lg, A.line));
+  g.visible = false; return g;
+}
+function setChute(S, on) { if (!on && !S.chute) return; if (!S.chute) { S.chute = makeWingChute(); S.root.add(S.chute); } S.chute.visible = on; }
 
 // ── 버기 (1인승, 길가 24대, 각자 자기 것) ──
 const CARS3 = []; let BUGGY_TPL = null;
@@ -2549,13 +2633,13 @@ function makeBuggy() { const g = BUGGY_TPL.clone(), wheels = []; g.traverse((o) 
 function placeBuggies() {
   buildBuggyTpl();
   const r = mulberry32(4242), cands = ROADS.filter((rd) => rd.w >= 6);
-  for (let t = 0; t < 4000 && CARS3.length < 24; t++) {
+  for (let t = 0; t < 8000 && CARS3.length < 40; t++) {
     const rd = cands[(r() * cands.length) | 0], i = 1 + ((r() * (rd.pts.length - 2)) | 0), a = rd.pts[i - 1], b = rd.pts[i + 1];
     const tx = b[0] - a[0], tz = b[1] - a[1], L = Math.hypot(tx, tz) || 1, side = r() < 0.5 ? -1 : 1, off = rd.w / 2 + 2.6;
     const x = rd.pts[i][0] - tz / L * side * off, z = rd.pts[i][1] + tx / L * side * off;
     if (terrainH(x, z) < 1.5 || riverDist(x, z) < 35 || footprintBlocked(x, z, 2.2) || Math.abs(x) > 900 || Math.abs(z) > 900 || TREE_SPOTS.some((t) => Math.hypot(t[0] - x, t[1] - z) < 4.5)) continue;
     let ok = true; forCircles(x, z, (c) => { if (Math.hypot(c.x - x, c.z - z) < c.r + 2) ok = false; }); if (!ok) continue;
-    if (CARS3.some((c) => Math.hypot(c.hx - x, c.hz - z) < 110)) continue;
+    if (CARS3.some((c) => Math.hypot(c.hx - x, c.hz - z) < 70)) continue;
     const c = { hx: x, hz: z, hyaw: Math.atan2(-tx, -tz) + (r() - 0.5) * 0.3, v: 0, vy: 0, steer: 0, ...makeBuggy() };
     resetCar(c); CARS3.push(c);
   }
@@ -2697,6 +2781,16 @@ function drawDropMarks(ctx, toXY, r) {
     if (d.opened) continue; const [x, y] = toXY(d.x, d.z);
     ctx.fillStyle = '#e8352a'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.round(r * 1.2)}px "Noto Sans KR"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(d.n), x, y + 1);
+  }
+}
+function drawCarMarks(ctx, toXY, s) {
+  for (const c of CARS3) {
+    if (c === P.car) continue; const [x, y] = toXY(c.x, c.z);
+    if (x < -10 || y < -10 || x > ctx.canvas.width + 10 || y > ctx.canvas.height + 10) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-c.yaw);
+    ctx.fillStyle = '#ffcf3a'; ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(-s * 0.55, -s, s * 1.1, s * 2, s * 0.35); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#111'; ctx.fillRect(-s * 0.4, -s * 0.55, s * 0.8, s * 0.35); ctx.restore();
   }
 }
 function drawPlanePath(ctx, toXY, w) {
