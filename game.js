@@ -3074,7 +3074,7 @@ function updatePrompt() {
     if (nearest.type === 'piece') what = `주기도문 – ${PIECES[nearest.n - 1].name}`;
     else if (nearest.type === 'genie') what = ['돈가방', '트로피', '왕관'][nearest.kind];
     else { verb = '열기'; what = '상자'; }
-    tt = `${verb} ${nearest.type === 'piece' ? PIECES[nearest.n - 1].name : what}`;
+    tt = `${nearest.type === 'piece' ? PIECES[nearest.n - 1].name : what} ${verb}`;
   } else if (nearCar && !state.inLobby) { verb = '타기'; what = '차'; tt = '차 타기'; }
   if (!verb) { pr.classList.add('hidden'); tu.classList.add('hidden'); return; }
   pr.querySelector('.verb').textContent = verb; pr.querySelector('.what').textContent = what;
