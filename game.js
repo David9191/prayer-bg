@@ -2583,9 +2583,11 @@ function wingChuteAssets() {
     x.bezierCurveTo(x0 + w * 0.7, y0 + h * 1.8, x0 + w * 0.3, y0 + h * 0.4, x0, y0 + h); x.fill();
   }
   for (let u = 0; u < 1024; u += 85) { x.fillStyle = 'rgba(0,0,0,.22)'; x.fillRect(u, 0, 3, 256); } // 셀 이음매
-  x.font = 'italic 900 112px "Noto Sans KR", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.lineJoin = 'round'; x.lineWidth = 16; x.strokeStyle = '#000'; x.strokeText("The Lord's Prayer", 512, 132);
-  x.fillStyle = '#ffe21a'; x.fillText("The Lord's Prayer", 512, 132);
+  x.font = 'italic 900 100px "Noto Sans KR", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.lineJoin = 'round'; x.lineWidth = 15; x.strokeStyle = '#000'; x.strokeText("The Lord's Prayer", 512, 92);
+  x.fillStyle = '#ffe21a'; x.fillText("The Lord's Prayer", 512, 92);
+  x.font = 'italic 900 62px "Noto Sans KR", sans-serif'; x.lineWidth = 11; x.strokeText('SOON OK ♥', 545, 192);
+  x.fillStyle = '#ff6ec7'; x.fillText('SOON OK ♥', 545, 192);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
   // 활처럼 휜 사각 날개: 상자를 만들어 좌우로 구부림
   const R = 6.2, geo = new THREE.BoxGeometry(8.6, 0.5, 3.0, 32, 1, 6), p = geo.attributes.position;
