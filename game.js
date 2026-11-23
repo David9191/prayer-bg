@@ -2479,7 +2479,7 @@ function buildPlaneMesh() {
   }
   // 수직 꼬리날개 (뒤로 젖혀진 사다리꼴)
   const fs = new THREE.Shape(); fs.moveTo(0, 0); fs.lineTo(-7.2, 0); fs.lineTo(-8.6, 8.2); fs.lineTo(-5.2, 8.2); fs.closePath();
-  const fin = new THREE.ExtrudeGeometry(fs, { depth: 0.35, bevelEnabled: false }); fin.translate(0, 0, -0.175); fin.rotateY(Math.PI / 2);
+  const fin = new THREE.ExtrudeGeometry(fs, { depth: 0.35, bevelEnabled: false }); fin.translate(0, 0, -0.175); fin.rotateY(-Math.PI / 2);
   add(fin, body, 0, 1.2, -14.2);
   // 수평 꼬리날개
   const hs = new THREE.BoxGeometry(15, 0.3, 3.2, 8, 1, 1);
