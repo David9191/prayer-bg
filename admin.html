@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>관리자 · 주기도문 배틀그라운드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&family=Teko:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--y:#f2a900;--bg:#0d1115;--panel:rgba(255,255,255,.05);--line:rgba(255,255,255,.12)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:#fff;font-family:'Noto Sans KR',sans-serif}
+.teko{font-family:'Teko'}
+.hidden{display:none!important}
+button{font-family:'Noto Sans KR';font-weight:900;cursor:pointer;border:0}
+/* 로그인 */
+#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 30% 20%,#1d2a33,#07090b)}
+#login .box{width:340px;background:rgba(0,0,0,.5);border-top:4px solid var(--y);padding:28px}
+#login h1{font-family:'Black Han Sans';font-size:30px;line-height:1.15}
+#login .en{font-family:'Teko';letter-spacing:.25em;color:var(--y);margin:4px 0 22px}
+#login input{width:100%;background:#000;border:1px solid var(--line);color:#fff;font-size:18px;padding:10px 12px;font-family:'Noto Sans KR'}
+#login button{width:100%;margin-top:12px;background:var(--y);color:#111;font-size:18px;padding:11px}
+#loginErr{color:#ff6b5b;font-size:13px;font-weight:700;min-height:18px;margin-top:8px}
+/* 본 화면 */
+#app{display:grid;grid-template-columns:300px 1fr 430px;grid-template-rows:auto 1fr auto;gap:12px;height:100vh;padding:12px}
+header{grid-column:1/4;display:flex;align-items:center;gap:18px}
+header h1{font-family:'Black Han Sans';font-size:26px}
+header .tag{font-family:'Teko';letter-spacing:.2em;color:var(--y);font-size:18px}
+#phase{margin-left:auto;font-family:'Black Han Sans';font-size:22px;padding:4px 16px;background:var(--panel);border-left:4px solid #888}
+#phase.lobby{border-color:#4aa3df}#phase.playing{border-color:#3ecf6a}#phase.ended{border-color:#ff6b5b}
+#timer{font-family:'Teko';font-size:44px;line-height:1;min-width:110px;text-align:right}
+.panel{background:var(--panel);border:1px solid var(--line);padding:14px;overflow:hidden;display:flex;flex-direction:column}
+.panel h3{font-family:'Teko';font-weight:500;font-size:20px;letter-spacing:.18em;color:#bbb;margin-bottom:8px}
+#left{gap:12px}
+#qr{background:#fff;padding:10px;align-self:center}
+#qr canvas,#qr img{display:block;width:220px;height:220px}
+#url{font-size:13px;word-break:break-all;text-align:center;color:#ddd}
+#counts{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center}
+#counts div{background:rgba(0,0,0,.3);padding:6px}
+#counts b{display:block;font-family:'Teko';font-size:38px;line-height:1;color:var(--y)}
+#counts span{font-size:12px;color:#bbb}
+.btn{padding:12px;font-size:17px;color:#111;background:#ddd}
+.btn.go{background:#3ecf6a}.btn.stop{background:#ff6b5b;color:#fff}.btn.reset{background:#4aa3df;color:#fff}
+.btn:disabled{opacity:.35;cursor:default}
+#mapWrap{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+#map{max-width:100%;max-height:100%;aspect-ratio:1;background:#2b5a6e}
+#right{gap:10px}
+#rankTbl{flex:1;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-family:'Teko';font-weight:500;letter-spacing:.12em;color:#aaa;text-align:left;padding:4px 6px;position:sticky;top:0;background:#151b21}
+td{padding:5px 6px;border-top:1px solid var(--line);white-space:nowrap}
+td.rk{font-family:'Teko';font-size:22px;color:var(--y);width:34px}
+td.nm{font-weight:700;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+tr.off td{opacity:.4}
+tr.clr td.nm::after{content:' ✔';color:#3ecf6a}
+.prog{display:flex;gap:2px}.prog i{width:9px;height:10px;background:rgba(255,255,255,.12)}.prog i.on{background:var(--y)}
+td .mini{background:transparent;color:#aaa;border:1px solid var(--line);font-size:11px;padding:2px 6px;margin-left:2px}
+td .mini:hover{color:#fff;border-color:#fff}
+#bottom{grid-column:1/4;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#feed{display:flex;flex-direction:column;gap:4px;max-height:120px;overflow:auto}
+#feed div{background:rgba(0,0,0,.35);padding:4px 10px;font-size:15px;font-weight:700}
+#feed div b{color:var(--y)}
+#stats{display:flex;gap:10px}
+#stats>div{flex:1;background:rgba(0,0,0,.3);padding:8px 10px}
+#stats h4{font-size:12px;color:#aaa;margin-bottom:4px}
+#stats ol{list-style:none;font-weight:700;font-size:15px}
+#stats ol li b{color:var(--y);font-family:'Teko';font-size:20px;margin-left:4px}
+#stats .big{font-family:'Teko';font-size:40px;line-height:1;color:var(--y)}
+</style>
+</head>
+<body>
+<div id="login">
+  <div class="box">
+    <h1>주기도문<br>배틀그라운드</h1>
+    <div class="en">ADMIN · 관리자</div>
+    <input id="pw" type="password" placeholder="관리자 비밀번호" autocomplete="current-password">
+    <button id="loginBtn">들어가기</button>
+    <div id="loginErr"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>주기도문 배틀그라운드</h1><span class="tag">ADMIN</span>
+    <div id="phase">-</div>
+    <div id="timer">0:00</div>
+  </header>
+  <section class="panel" id="left">
+    <h3>접속 QR</h3>
+    <div id="qr"></div>
+    <div id="url"></div>
+    <div id="counts">
+      <div><b id="cOn">0</b><span>접속</span></div>
+      <div><b id="cClr">0</b><span>아멘(클리어)</span></div>
+    </div>
+    <button class="btn reset" id="bReset">새 판 · 대기실 열기</button>
+    <button class="btn go" id="bStart">게임 시작</button>
+    <button class="btn stop" id="bEnd">게임 종료</button>
+  </section>
+  <section class="panel">
+    <h3>전체 지도 · 플레이어 위치</h3>
+    <div id="mapWrap"><canvas id="map" width="900" height="900"></canvas></div>
+  </section>
+  <section class="panel" id="right">
+    <h3>실시간 순위</h3>
+    <div id="rankTbl"><table><thead><tr><th>#</th><th>닉네임</th><th>진행</th><th>기록</th><th>실수</th><th>지니</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+  </section>
+  <section id="bottom">
+    <div class="panel"><h3>킬 로그</h3><div id="feed"></div></div>
+    <div class="panel"><h3>통계</h3>
+      <div id="stats">
+        <div><h4>가장 많이 틀린 조각 (실수 TOP 3)</h4><ol id="misTop"></ol></div>
+        <div><h4>지니에게 속은 횟수 (전체)</h4><div class="big" id="genieSum">0</div></div>
+      </div>
+    </div>
+  </section>
+</div>
+<script type="module" src="./admin.js"></script>
+</body>
+</html>
