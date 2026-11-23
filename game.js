@@ -2119,6 +2119,8 @@ async function initNet() {
       import(`https://www.gstatic.com/firebasejs/${FBV}/firebase-database.js`),
     ]);
     const fapp = app.initializeApp(FB_CONFIG), a = auth.getAuth(fapp);
+    // 한 기기에서 여러 명 시험할 때: 주소 끝에 ?solo 를 붙이면 매번 새 사람으로 접속
+    if (new URLSearchParams(location.search).has('solo')) await auth.setPersistence(a, auth.inMemoryPersistence);
     const cred = await Promise.race([auth.signInAnonymously(a), new Promise((_, rej) => setTimeout(() => rej(new Error('시간 초과')), 8000))]);
     NET.fb = db; NET.db = db.getDatabase(fapp); NET.uid = cred.user.uid; NET.room = db.ref(NET.db, 'rooms/main');
     db.onValue(db.ref(NET.db, '.info/serverTimeOffset'), (snap) => (NET.offset = snap.val() || 0));
