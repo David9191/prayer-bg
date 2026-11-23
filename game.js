@@ -2552,7 +2552,7 @@ function placeBuggies() {
     const rd = cands[(r() * cands.length) | 0], i = 1 + ((r() * (rd.pts.length - 2)) | 0), a = rd.pts[i - 1], b = rd.pts[i + 1];
     const tx = b[0] - a[0], tz = b[1] - a[1], L = Math.hypot(tx, tz) || 1, side = r() < 0.5 ? -1 : 1, off = rd.w / 2 + 2.6;
     const x = rd.pts[i][0] - tz / L * side * off, z = rd.pts[i][1] + tx / L * side * off;
-    if (terrainH(x, z) < 1.5 || riverDist(x, z) < 35 || footprintBlocked(x, z, 2.2) || Math.abs(x) > 900 || Math.abs(z) > 900) continue;
+    if (terrainH(x, z) < 1.5 || riverDist(x, z) < 35 || footprintBlocked(x, z, 2.2) || Math.abs(x) > 900 || Math.abs(z) > 900 || TREE_SPOTS.some((t) => Math.hypot(t[0] - x, t[1] - z) < 4.5)) continue;
     let ok = true; forCircles(x, z, (c) => { if (Math.hypot(c.x - x, c.z - z) < c.r + 2) ok = false; }); if (!ok) continue;
     if (CARS3.some((c) => Math.hypot(c.hx - x, c.hz - z) < 110)) continue;
     const c = { hx: x, hz: z, hyaw: Math.atan2(-tx, -tz) + (r() - 0.5) * 0.3, v: 0, vy: 0, steer: 0, ...makeBuggy() };
@@ -2638,7 +2638,7 @@ function chooseDropPts() {
       const a = rd.pts[i - 1], b = rd.pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
       for (const side of [1, -1]) {
         const off = rd.w / 2 + 6, x = rd.pts[i][0] - (b[1] - a[1]) / L * side * off, z = rd.pts[i][1] + (b[0] - a[0]) / L * side * off;
-        if (terrainH(x, z) < 1.5 || footprintBlocked(x, z, 5) || riverDist(x, z) < 30) continue;
+        if (terrainH(x, z) < 1.5 || footprintBlocked(x, z, 6) || riverDist(x, z) < 30 || TREE_SPOTS.some((t) => Math.hypot(t[0] - x, t[1] - z) < 9)) continue;
         let ok = true; forCircles(x, z, (c) => { if (Math.hypot(c.x - x, c.z - z) < c.r + 3) ok = false; }); if (!ok) continue;
         got = [Math.round(x), Math.round(z)]; break;
       }
