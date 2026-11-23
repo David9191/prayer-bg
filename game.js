@@ -2221,12 +2221,13 @@ function enterPhase(ph, prev) {
 function updateLobbyBar() {
   const el = $('lobbyBar'); if (!el) return;
   const n = Object.values(NET.players).filter((p) => p.online).length;
-  el.classList.toggle('hidden', !(NET.joined && NET.phase === 'lobby'));
-  el.innerHTML = `비행기 탑승 대기 중… <b>${n}</b>명<small>관리자가 게임을 시작하면 섬 어딘가에 떨어져요</small>`;
+  const ended = NET.phase === 'ended' && !state.podium;
+  el.classList.toggle('hidden', !(NET.joined && (NET.phase === 'lobby' || ended)));
+  el.innerHTML = ended ? `게임 종료! 수고했어요 🎉<small>관리자가 새 판을 열면 다시 비행기에 탈 수 있어요</small>` : `비행기 탑승 대기 중… <b>${n}</b>명<small>관리자가 게임을 시작하면 섬 어딘가에 떨어져요</small>`;
 }
 function onPlayers() {
   renderRank(); updateLobbyBar();
-  if (state.podium) { buildPodium(); if (!$('results').classList.contains('hidden')) showResults(); }
+  if (NET.phase === 'ended' && POD.g) { buildPodium(); if (!$('results').classList.contains('hidden')) showResults(); }
   for (const [uid, r] of NET.remotes) { const p = NET.players[uid]; if (r.label) r.label.visible = !!p && NET.phase === 'lobby'; if (p && r.nick !== p.nick) setRemoteNick(r, p.nick); }
 }
 function kicked() {
@@ -2363,7 +2364,7 @@ $('amen').addEventListener('click', doAmen);
 document.querySelectorAll('.bgmBtn').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setBgm(!AUD.bgmOn); }));
 setBgm(AUD.bgmOn);
 $('winBtn').addEventListener('click', () => { $('win').classList.add('hidden'); ui.pauseBlocked = false; if (!IS_TOUCH) lockPointer(); });
-$('resBtn').addEventListener('click', () => { $('results').classList.add('hidden'); if (!IS_TOUCH) lockPointer(); });
+$('resBtn').addEventListener('click', () => { if (state.podium) { leavePodiumView(); return; } $('results').classList.add('hidden'); if (!IS_TOUCH) lockPointer(); });
 $('mapOv').addEventListener('click', () => toggleMap(false));
 $('inv').addEventListener('click', () => toggleInv(false));
 addEventListener('beforeunload', (e) => { if (state.playing) { e.preventDefault(); e.returnValue = ''; } });
@@ -2742,19 +2743,30 @@ function removePodium() {
 }
 const _pm = new THREE.Matrix4(), _pq = new THREE.Quaternion(), _pe = new THREE.Euler(), _pv = new THREE.Vector3(), _ps = new THREE.Vector3(1, 1, 1);
 function updatePodium(dt) {
-  if (!POD.g) return; POD.t += dt;
-  for (const S of POD.S) { animateGLB(S, dt, 0, 'stand', true, false); if (S.rank === 0) S.root.position.y = S.baseY + Math.abs(Math.sin(POD.t * 3.2)) * 0.28; }
-  if (POD.conf) { for (let i = 0; i < POD.cd.length; i++) { const d = POD.cd[i]; d.y -= d.s * dt; if (d.y < 0) d.y += 9; d.r += d.w * dt; _pv.set(d.x + Math.sin(d.r * 0.5) * 0.3, d.y, d.z); _pq.setFromEuler(_pe.set(d.r, d.r * 0.7, 0)); POD.conf.setMatrixAt(i, _pm.compose(_pv, _pq, _ps)); } POD.conf.instanceMatrix.needsUpdate = true; }
+  if (!POD.g) return; podiumAnim(dt);
   const c = POD_C(), a = Math.sin(POD.t * 0.25) * 0.55;
   camera.position.set(c.x + Math.sin(a) * 10, c.y + 3.4, c.z + Math.cos(a) * 10); camera.lookAt(c.x, c.y + 1.8, c.z);
   sun.position.set(c.x + sunDir.x * 200, c.y + sunDir.y * 200, c.z + sunDir.z * 200); sun.target.position.set(c.x, c.y, c.z);
   soldier.root.visible = false;
 }
+function podiumAnim(dt) {
+  if (!POD.g) return; POD.t += dt;
+  for (const S of POD.S) { animateGLB(S, dt, 0, 'stand', true, false); if (S.rank === 0) S.root.position.y = S.baseY + Math.abs(Math.sin(POD.t * 3.2)) * 0.28; }
+  if (POD.conf) { for (let i = 0; i < POD.cd.length; i++) { const d = POD.cd[i]; d.y -= d.s * dt; if (d.y < 0) d.y += 9; d.r += d.w * dt; _pv.set(d.x + Math.sin(d.r * 0.5) * 0.3, d.y, d.z); _pq.setFromEuler(_pe.set(d.r, d.r * 0.7, 0)); POD.conf.setMatrixAt(i, _pm.compose(_pv, _pq, _ps)); } POD.conf.instanceMatrix.needsUpdate = true; }
+}
+// 시상식 화면에서 나와 갑판을 걸어 다니며 다음 판을 기다림 (시상대는 그대로 둠)
+function leavePodiumView() {
+  if (!state.podium) return;
+  state.podium = false; state.inLobby = true; $('results').classList.add('hidden');
+  const c = POD_C(); P.mode = 'walk'; P.car = null; P.x = c.x; P.z = c.z + 7; P.y = LOBBY.y + 0.05; P.vy = 0; P.charYaw = 0; cam.yaw = 0; cam.pitch = -0.08;
+  $('bottom').classList.add('lobbyHide'); updateLobbyBar();
+  if (!IS_TOUCH) lockPointer();
+}
 function enterPodium() {
   state.podium = true; P.car = null; if (P.mode !== 'walk') { P.mode = 'walk'; }
-  setChute(soldier, false); buildPodium(); showResults(); $('results').classList.add('podium');
+  setChute(soldier, false); buildPodium(); showResults(); $('results').classList.add('podium'); $('resBtn').textContent = '대기실 둘러보기 ▶'; updateLobbyBar();
 }
-function leavePodium() { state.podium = false; removePodium(); $('results').classList.remove('podium'); }
+function leavePodium() { state.podium = false; removePodium(); $('results').classList.remove('podium'); $('resBtn').textContent = '닫기'; }
 
 // ── 관전 모드 (?watch): 대기실 → 비행기 → 섬 전경 → 시상대 ──
 function watchPhase() {
@@ -2983,7 +2995,7 @@ function loop() {
   { const alt = Math.max(0, camera.position.y - Math.max(terrainH(camera.position.x, camera.position.z), 0) - 40), b = LOW ? 430 : 700; scene.fog.far = b + alt * 2.2; scene.fog.near = (LOW ? 90 : 140) + alt * 1.2; }
   if (state.playing && state.podium) { updatePodium(dt); sendPos(dt); }
   else if (state.playing) {
-    update(dt); if (P.mode !== 'plane' && P.y - terrainH(P.x, P.z) < 120) updateGrass(); if (!state.inLobby && P.mode !== 'plane') checkZone(dt); drawCompass(); drawMinimap(); if (ui.map) drawBigMap();
+    update(dt); if (POD.g) podiumAnim(dt); if (P.mode !== 'plane' && P.y - terrainH(P.x, P.z) < 120) updateGrass(); if (!state.inLobby && P.mode !== 'plane') checkZone(dt); drawCompass(); drawMinimap(); if (ui.map) drawBigMap();
     sendPos(dt);
   } else if (WATCH) watchCam(dt);
   else {
