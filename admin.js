@@ -21,7 +21,7 @@ const db = getDatabase(app);
 const room = ref(db, 'rooms/main');
 let offset = 0, st = { phase: 'lobby', round: 0, startAt: 0 }, players = {}, pos = {}, drops = {};
 // 보급상자 낙하 지점 (게임 코드가 계산한 값과 같아야 함)
-const DROP_PTS = [[-417, 433], [28, -314], [558, 30]];
+const DROP_PTS = [[-422, 507], [-3, -292], [551, 5]];
 const PLANE_SPD = 70;
 function makePlanePath() {
   const a = Math.random() * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a), o = (Math.random() - 0.5) * 700, cx = -dz * o, cz = dx * o;
