@@ -2265,7 +2265,7 @@ function updateRemotes(dt) {
     if (r.car) r.car.g.visible = vis && s === 6;
     if (!vis) continue;
     r.root.position.set(r.x, r.y + (s === 4 ? 0.6 : 0), r.z); r.root.rotation.y = r.yaw;
-    if (s === 6) { if (!r.car && BUGGY_TPL) r.car = makeBuggy(); if (r.car) { r.car.g.visible = true; r.car.g.position.set(r.x, r.y - SEAT_Y, r.z); r.car.g.rotation.set(0, r.yaw, 0); for (const w of r.car.wheels) w.rotation.x -= (r.v || 0) * dt / 0.42; } }
+    if (s === 6) { if (!r.car && BUGGY_TPL) r.car = makeBuggy(); if (r.car) { r.car.g.visible = true; r.car.g.position.set(r.x, r.y - SEAT_Y, r.z); r.car.g.rotation.set(0, r.yaw, 0); for (const w of r.car.wheels) w.rotation.x -= (r.v || 0) * dt / 0.5; } }
     setChute(r.S, s === 5);
     // 멀리 있으면 애니메이션을 덜 자주 갱신
     r.acc = (r.acc || 0) + dt; if (d2 > 80 * 80 && r.acc < 0.1) continue;
@@ -2404,10 +2404,10 @@ function setupTouch() {
   $('amen').querySelector('small').textContent = '터치해서 아멘!';
 }
 
-// ───────────────────────── 3단계: 비행기 · 낙하산 · 버기 · 보급상자 · 시상대 ─────────────────────────
+// ───────────────────────── 3단계: 비행기 · 낙하산 · 차 · 보급상자 · 시상대 ─────────────────────────
 const PLANE = { ALT: 330, SPD: 70, mesh: null, props: [] };
 const MODE_CODE = { plane: 3, fall: 4, chute: 5, drive: 6 };
-const SEAT_Y = 0.36;
+const SEAT_Y = 0.46;
 P.mode = 'walk'; P.vx = 0; P.vz = 0; P.car = null;
 let lastLookAt = 0, nearCar = null, engT = 0;
 const M3 = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0.2, ...o });
@@ -2611,24 +2611,73 @@ function makeWingChute() {
 }
 function setChute(S, on) { if (!on && !S.chute) return; if (!S.chute) { S.chute = makeWingChute(); S.root.add(S.chute); } S.chute.visible = on; }
 
-// ── 버기 (1인승, 길가 24대, 각자 자기 것) ──
+// ── 차 (1인승 오프로드 차, 길가 40대, 각자 자기 것) ──
 const CARS3 = []; let BUGGY_TPL = null;
+function carBodyTex(top) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d'), r = mulberry32(top ? 17 : 23);
+  x.fillStyle = '#d9a12c'; x.fillRect(0, 0, 512, 256);
+  for (let i = 0; i < 1400; i++) { const a = r(); x.fillStyle = a < 0.5 ? `rgba(90,60,20,${0.05 + r() * 0.12})` : `rgba(255,230,150,${0.04 + r() * 0.08})`; x.fillRect(r() * 512, r() * 256, 2 + r() * 14, 1 + r() * 5); }
+  x.fillStyle = 'rgba(60,40,15,.35)'; x.fillRect(0, 226, 512, 30); // 아래쪽 흙때
+  if (top) { x.fillStyle = '#151515'; x.fillRect(196, 0, 46, 256); x.fillRect(270, 0, 46, 256); for (let i = 0; i < 60; i++) { x.fillStyle = '#d9a12c'; x.fillRect(196 + r() * 120, r() * 256, 2 + r() * 6, 2 + r() * 5); } }
+  else for (let k = 0; k < 4; k++) { x.fillStyle = '#151515'; x.beginPath(); const u = 120 + k * 70; x.moveTo(u, 256); x.lineTo(u + 26, 256); x.lineTo(u + 70, 60); x.lineTo(u + 52, 60); x.fill(); }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+function tireTex() {
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 256; const x = cv.getContext('2d');
+  x.fillStyle = '#1b1b1b'; x.fillRect(0, 0, 64, 256); x.fillStyle = '#2c2c2c';
+  for (let v = 0; v < 256; v += 16) { x.beginPath(); x.moveTo(4, v); x.lineTo(30, v + 7); x.lineTo(30, v + 13); x.lineTo(4, v + 6); x.fill(); x.beginPath(); x.moveTo(60, v + 8); x.lineTo(34, v + 15); x.lineTo(34, v + 21); x.lineTo(60, v + 14); x.fill(); }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 3); return t;
+}
 function buildBuggyTpl() {
-  const g = new THREE.Group(), body = M3(0xc99a2e, { roughness: 0.45, metalness: 0.3 }), frame = M3(0x1e1e1e, { roughness: 0.45, metalness: 0.6 }), tire = M3(0x141414, { roughness: 0.95, metalness: 0 }), seat = M3(0x3a3530, { roughness: 0.85 });
+  const g = new THREE.Group();
+  const yTop = M3(0xffffff, { map: carBodyTex(true), roughness: 0.55, metalness: 0.25 }), ySide = M3(0xffffff, { map: carBodyTex(false), roughness: 0.6, metalness: 0.2 });
+  const frame = M3(0x23272b, { roughness: 0.45, metalness: 0.65 }), rust = M3(0xb5652a, { roughness: 0.5, metalness: 0.5 }), black = M3(0x161616, { roughness: 0.8, metalness: 0.1 }), chrome = M3(0xd8d8d8, { roughness: 0.2, metalness: 0.95 });
+  const tread = M3(0xffffff, { map: tireTex(), roughness: 0.95, metalness: 0 }), rim = M3(0x2b2b2b, { roughness: 0.4, metalness: 0.7 });
   const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
-  add(new THREE.BoxGeometry(1.5, 0.22, 3.0), frame, 0, 0.55, 0);
-  add(new THREE.BoxGeometry(1.35, 0.32, 0.95), body, 0, 0.78, -1.1);
-  add(new THREE.BoxGeometry(1.25, 0.42, 0.7), body, 0, 0.84, 1.15);
-  add(new THREE.BoxGeometry(0.62, 0.12, 0.62), seat, 0, 0.74, 0.15);
-  add(new THREE.BoxGeometry(0.62, 0.7, 0.12), seat, 0, 1.05, 0.5).rotation.x = 0.2;
-  const tube = (a, b) => { const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), m = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, A.distanceTo(B), 6), frame); m.position.copy(A).add(B).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()); m.castShadow = true; g.add(m); };
-  for (const sx of [-0.62, 0.62]) { tube([sx, 0.65, -0.6], [sx, 1.75, -0.2]); tube([sx, 0.65, 0.75], [sx, 1.75, 0.55]); tube([sx, 1.75, -0.2], [sx, 1.75, 0.55]); }
-  tube([-0.62, 1.75, -0.2], [0.62, 1.75, -0.2]); tube([-0.62, 1.75, 0.55], [0.62, 1.75, 0.55]);
-  const sw = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.03, 6, 14), frame); sw.position.set(0, 1.02, -0.38); sw.rotation.x = -0.9; g.add(sw);
-  const lamp = M3(0xfff3c0, { emissive: 0x997733 });
-  for (const x of [-0.45, 0.45]) add(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 10).rotateX(Math.PI / 2), lamp, x, 0.84, -1.6);
-  const wg = new THREE.CylinderGeometry(0.42, 0.42, 0.32, 14); wg.rotateZ(Math.PI / 2);
-  [[-0.86, -1.05], [0.86, -1.05], [-0.86, 1.05], [0.86, 1.05]].forEach(([x, z], i) => { const w = add(wg, tire, x, 0.42, z); w.userData.wheel = i; w.rotation.order = 'YXZ'; });
+  // 바닥 프레임
+  add(new THREE.BoxGeometry(1.25, 0.16, 3.1), frame, 0, 0.6, 0.05);
+  // 앞쪽 본체 (앞으로 갈수록 낮아지는 둥근 보닛, 가운데 검은 줄 두 개)
+  const hood = new THREE.BoxGeometry(1.3, 0.55, 1.75, 8, 3, 8);
+  { const p = hood.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), f = (0.875 - z) / 1.75; // f: 뒤 0 → 앞 1
+      const top = y > 0; let ny = y; if (top) ny = y - f * f * 0.32; const sx = 1 - (top ? 0.12 : 0.04) * Math.pow(Math.abs(x) / 0.65, 2) - f * 0.1;
+      p.setXYZ(i, x * sx, ny, z); } hood.computeVertexNormals(); }
+  add(hood, [ySide, ySide, yTop, black, ySide, ySide], 0, 0.93, -0.72);
+  // 뒤쪽 본체 (좌석 뒤)
+  const tub = new THREE.BoxGeometry(1.2, 0.5, 0.9, 4, 2, 4);
+  add(tub, [ySide, ySide, yTop, black, ySide, ySide], 0, 0.92, 1.12);
+  // 좌석 · 운전대
+  add(new THREE.BoxGeometry(0.58, 0.14, 0.6), black, 0, 0.8, 0.3);
+  add(new THREE.BoxGeometry(0.58, 0.8, 0.14), black, 0, 1.15, 0.62).rotation.x = 0.18;
+  const sw = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.03, 8, 18), black); sw.position.set(0, 1.18, -0.2); sw.rotation.x = -1.0; g.add(sw);
+  // 롤케이지
+  const tube = (a, b, m = frame, r = 0.045) => { const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), t = new THREE.Mesh(new THREE.CylinderGeometry(r, r, A.distanceTo(B), 8), m); t.position.copy(A).add(B).multiplyScalar(0.5); t.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()); t.castShadow = true; g.add(t); };
+  for (const sx of [-0.6, 0.6]) {
+    tube([sx, 0.95, -0.35], [sx * 0.92, 1.9, 0.15]); tube([sx, 1.0, 0.9], [sx * 0.92, 1.95, 0.6]); tube([sx * 0.92, 1.9, 0.15], [sx * 0.92, 1.95, 0.6]);
+    tube([sx * 0.92, 1.95, 0.6], [sx * 0.9, 1.05, 1.55]); tube([sx, 0.95, -0.35], [sx * 1.05, 0.7, -1.45]);
+    tube([sx * 0.92, 1.9, 0.15], [sx, 1.0, 0.9], rust, 0.035);
+  }
+  tube([-0.55, 1.9, 0.15], [0.55, 1.9, 0.15]); tube([-0.55, 1.95, 0.6], [0.55, 1.95, 0.6]); tube([-0.55, 1.95, 0.6], [0.55, 1.9, 0.15], rust, 0.035);
+  tube([-0.55, 1.05, 1.55], [0.55, 1.05, 1.55]);
+  // 앞 범퍼 + 둥근 전조등
+  tube([-0.62, 0.62, -1.62], [0.62, 0.62, -1.62], black, 0.05);
+  const lamp = M3(0xfff6d8, { emissive: 0xcfb070, emissiveIntensity: 0.6 });
+  for (const x of [-0.4, 0.4]) { const ring = add(new THREE.CylinderGeometry(0.15, 0.15, 0.12, 16).rotateX(Math.PI / 2), black, x, 0.72, -1.66); add(new THREE.CircleGeometry(0.11, 16), lamp, x, 0.72, -1.725).rotation.y = Math.PI; }
+  add(new THREE.BoxGeometry(0.5, 0.05, 0.12), chrome, 0, 1.0, -1.3).rotation.x = -0.3; // 보닛 위 금속 장식
+  // 서스펜션 팔 + 주황 코일 스프링
+  const coil = (() => { const pts = []; for (let i = 0; i <= 80; i++) { const t = i / 80, a = t * Math.PI * 2 * 7; pts.push(new THREE.Vector3(Math.cos(a) * 0.085, t * 0.5 - 0.25, Math.sin(a) * 0.085)); } return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 160, 0.018, 5, false); })();
+  for (const [sx, z] of [[-1, -1.15], [1, -1.15], [-1, 1.15], [1, 1.15]]) {
+    tube([sx * 0.55, 0.62, z - 0.18], [sx * 0.95, 0.52, z], black, 0.035); tube([sx * 0.55, 0.62, z + 0.18], [sx * 0.95, 0.52, z], black, 0.035);
+    const c = new THREE.Mesh(coil, rust); c.position.set(sx * 0.72, 0.92, z); c.rotation.z = sx * 0.45; c.castShadow = true; g.add(c);
+    tube([sx * 0.6, 1.18, z], [sx * 0.86, 0.66, z], black, 0.022);
+  }
+  // 큰 오프로드 바퀴 (홈 무늬 + 휠)
+  const wg = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 22); wg.rotateZ(Math.PI / 2);
+  const rg = new THREE.CylinderGeometry(0.3, 0.3, 0.44, 16); rg.rotateZ(Math.PI / 2);
+  [[-0.98, -1.15], [0.98, -1.15], [-0.98, 1.15], [0.98, 1.15]].forEach(([x, z], i) => {
+    const w = add(wg, [tread, black, black], x, 0.5, z); w.userData.wheel = i; w.rotation.order = 'YXZ';
+    const hub = new THREE.Mesh(rg, rim); w.add(hub);
+    const nut = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.08, 0.08), frame); w.add(nut);
+  });
   g.rotation.order = 'YXZ'; BUGGY_TPL = g;
 }
 function makeBuggy() { const g = BUGGY_TPL.clone(), wheels = []; g.traverse((o) => { if (o.userData.wheel !== undefined) wheels[o.userData.wheel] = o; }); scene.add(g); return { g, wheels }; }
@@ -2655,11 +2704,11 @@ function poseCar(c, dt) {
     pitch = Math.atan2(hF - hB, 2.2); roll = Math.atan2(hR - hL, 1.7);
   }
   c.g.position.set(c.x, c.y, c.z); c.g.rotation.set(pitch, c.yaw, roll);
-  for (let i = 0; i < 4; i++) { const w = c.wheels[i]; w.rotation.x -= c.v * dt / 0.42; w.rotation.y = i < 2 ? c.steer * 0.45 : 0; }
+  for (let i = 0; i < 4; i++) { const w = c.wheels[i]; w.rotation.x -= c.v * dt / 0.5; w.rotation.y = i < 2 ? c.steer * 0.45 : 0; }
 }
 function enterCar(c) {
   setStance('stand'); P.mode = 'drive'; P.car = c; c.v = 0; P.vy = 0;
-  toast(IS_TOUCH ? '🚙 버기 탑승 · 조이스틱으로 운전, [내리기]로 하차' : '🚙 버기 탑승 · W/S 가속·후진, A/D 방향, F 내리기', '', 2600);
+  toast(IS_TOUCH ? '🚙 차 탑승 · 조이스틱으로 운전, [내리기]로 하차' : '🚙 차 탑승 · W/S 가속·후진, A/D 방향, F 내리기', '', 2600);
 }
 function exitCar() {
   const c = P.car; if (!c) return;
@@ -2697,7 +2746,7 @@ function updateDrive(dt, f, r, sprint) {
   // 마우스/화면을 잠깐 안 움직이면 카메라가 차 뒤로 돌아옴
   if (performance.now() - lastLookAt > 1500 && Math.abs(c.v) > 2) cam.yaw = lerpAngle(cam.yaw, c.yaw, 1 - Math.exp(-2.2 * dt));
 }
-// 엔진 소리 (비행기 · 버기)
+// 엔진 소리 (비행기 · 차)
 const ENG = {};
 function engineSet(kind, v) {
   if (!actx || !AUD.sfxGain) return;
@@ -3017,7 +3066,7 @@ function updatePrompt() {
   if (state.podium || P.mode === 'chute') { /* 없음 */ }
   else if (P.mode === 'plane') { verb = '뛰어내리기'; tt = '뛰어내리기'; }
   else if (P.mode === 'fall') { verb = '낙하산 펴기'; tt = '낙하산'; }
-  else if (P.mode === 'drive') { verb = '내리기'; what = '버기'; tt = '내리기'; }
+  else if (P.mode === 'drive') { verb = '내리기'; what = '차'; tt = '내리기'; }
   else if (state.amenReady) { /* 아멘 버튼이 따로 있음 */ }
   else if (nearest && nearest.type === 'drop') { verb = '열기'; what = `보급상자 ${nearest.n}`; tt = '보급상자 열기'; }
   else if (nearest && !state.cleared) {
@@ -3026,7 +3075,7 @@ function updatePrompt() {
     else if (nearest.type === 'genie') what = ['돈가방', '트로피', '왕관'][nearest.kind];
     else { verb = '열기'; what = '상자'; }
     tt = `${verb} ${nearest.type === 'piece' ? PIECES[nearest.n - 1].name : what}`;
-  } else if (nearCar && !state.inLobby) { verb = '타기'; what = '버기'; tt = '버기 타기'; }
+  } else if (nearCar && !state.inLobby) { verb = '타기'; what = '차'; tt = '차 타기'; }
   if (!verb) { pr.classList.add('hidden'); tu.classList.add('hidden'); return; }
   pr.querySelector('.verb').textContent = verb; pr.querySelector('.what').textContent = what;
   pr.classList.remove('hidden'); tu.textContent = tt; tu.classList.remove('hidden');
