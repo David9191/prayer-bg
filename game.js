@@ -1942,7 +1942,7 @@ function renderSlots() {
 }
 function players() {
   if (!NET.ok || (!NET.joined && !WATCH)) return [{ nick: state.nick, cleared: state.cleared, time: state.clearTime, count: state.found.length, last: 0, me: true }];
-  const list = Object.entries(NET.players).filter(([, p]) => p && p.round === NET.round).map(([uid, p]) => ({ nick: p.nick, cleared: !!p.cleared, time: clearMsOf(p), count: p.count || 0, last: p.lastAt || 0, me: uid === NET.uid, online: p.online }));
+  const list = Object.entries(NET.players).filter(([, p]) => p && p.round === NET.round).map(([uid, p]) => ({ nick: p.nick, cleared: !!p.cleared, time: clearMsOf(p), count: p.count || 0, last: p.lastAt || 0, me: uid === NET.uid && !WATCH, online: p.online }));
   const me = list.find((p) => p.me); if (me) { me.count = state.found.length; me.cleared = state.cleared; if (state.cleared && !isFinite(me.time)) me.time = state.clearTime; }
   else if (!WATCH) list.push({ nick: state.nick, cleared: state.cleared, time: state.clearTime, count: state.found.length, last: 0, me: true });
   return list;
