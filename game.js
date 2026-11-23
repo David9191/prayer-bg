@@ -2120,6 +2120,7 @@ const FBV = '10.14.1';
 const NET = { ok: false, fb: null, db: null, uid: null, offset: 0, room: null, phase: 'none', round: 0, startAt: 0, players: {}, remotes: new Map(), joined: false, joinAt: 0, sendT: 0, lastSent: '', kickSeen: 0 };
 const serverNow = () => Date.now() + NET.offset;
 const WATCH = new URLSearchParams(location.search).has('watch');
+if (new URLSearchParams(location.search).has('debug')) setTimeout(() => (window.PBG = { P, CARS3, DROPS, state, cam, action, items }), 0);
 async function initNet() {
   try {
     const [app, auth, db] = await Promise.all([
@@ -2861,8 +2862,8 @@ function update(dt) {
   } else {
     soldier.root.visible = true;
     const rX = Math.cos(cam.yaw), rZ = -Math.sin(cam.yaw), side = onFoot ? 0.55 : 0;
-    shoulder.set(P.x + rX * side, P.y + P.eye + (md === 'drive' ? 0.7 : 0.22), P.z + rZ * side);
-    const back = md === 'drive' ? 6.2 : md === 'chute' ? 7 : md === 'fall' ? 5.5 : P.stance === 'prone' ? 2.6 : 3.3;
+    shoulder.set(P.x + rX * side, P.y + P.eye + (md === 'drive' ? 0.7 : md === 'chute' ? 2.2 : 0.22), P.z + rZ * side);
+    const back = md === 'drive' ? 6.2 : md === 'chute' ? 9 : md === 'fall' ? 5.5 : P.stance === 'prone' ? 2.6 : 3.3;
     let tHit = 1;
     for (let k = 1; k <= 12; k++) {
       const s = k / 12; tmpV.copy(shoulder).addScaledVector(lookDir, -back * s);
@@ -2979,6 +2980,7 @@ function loop() {
   WIND.time.value = performance.now() / 1000;
   if (NET.remotes.size) updateRemotes(dt);
   updatePlaneVis(dt); if (DROPS.length) updateDrops(dt);
+  { const alt = Math.max(0, camera.position.y - Math.max(terrainH(camera.position.x, camera.position.z), 0) - 40), b = LOW ? 430 : 700; scene.fog.far = b + alt * 2.2; scene.fog.near = (LOW ? 90 : 140) + alt * 1.2; }
   if (state.playing && state.podium) { updatePodium(dt); sendPos(dt); }
   else if (state.playing) {
     update(dt); if (P.mode !== 'plane' && P.y - terrainH(P.x, P.z) < 120) updateGrass(); if (!state.inLobby && P.mode !== 'plane') checkZone(dt); drawCompass(); drawMinimap(); if (ui.map) drawBigMap();
