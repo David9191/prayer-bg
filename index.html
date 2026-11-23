@@ -141,6 +141,14 @@ body.touch #lobbyBar b{font-size:24px}
 #resList .nm{flex:1}
 #resList .rc{font-family:'Teko';font-size:22px}
 #resMe{margin-top:10px;font-weight:700;color:#ddd}
+#results.podium{background:linear-gradient(90deg,rgba(5,8,12,0) 40%,rgba(5,8,12,.82) 70%);align-items:flex-end;padding-right:5vw}
+#results.podium h2::before{content:'🏆 '}
+body.touch #results.podium{background:linear-gradient(180deg,rgba(5,8,12,0) 35%,rgba(5,8,12,.85) 60%);align-items:center;justify-content:flex-end;padding:0 0 4vh}
+body.touch #results.podium h2{font-size:28px}
+body.touch #results.podium #resList li{padding:3px 10px;margin:2px 0}
+#watchTag{position:fixed;left:18px;top:14px;z-index:50;background:rgba(0,0,0,.6);border-left:4px solid var(--y);padding:6px 14px;font-family:'Black Han Sans';font-size:20px;color:#fff;pointer-events:none}
+#watchTag small{display:block;font-family:'Noto Sans KR';font-size:11px;color:#bbb;font-weight:700}
+body.watch #resBtn{display:none}
 #resBtn{margin-top:18px;pointer-events:auto;background:transparent;border:2px solid #fff;color:#fff;font-family:'Noto Sans KR';font-weight:700;font-size:15px;padding:8px 22px;cursor:pointer}
 
 /* ===== 모바일 ===== */
@@ -296,7 +304,8 @@ body.touch #knob{width:52px;height:52px;margin:-26px 0 0 -26px}
     <b>CTRL</b><span>걷기</span>
     <b>SPACE</b><span>점프</span>
     <b>C / Z</b><span>앉기 / 엎드리기</span>
-    <b>F</b><span>줍기 · 상자 열기</span>
+    <b>F</b><span>줍기 · 상자 열기 · 버기 타기/내리기</span>
+    <b>F / SPACE</b><span>비행기에서 뛰어내리기 · 낙하산</span>
     <b>V</b><span>1인칭 / 3인칭</span>
     <b>ALT + 마우스</b><span>자유 시점</span>
     <b>TAB</b><span>인벤토리</span>
@@ -316,6 +325,7 @@ body.touch #knob{width:52px;height:52px;margin:-26px 0 0 -26px}
   <button id="winBtn">계속 둘러보기</button>
 </div>
 
+<div id="watchTag" class="hidden">관전 모드 · 시상대 화면<small>화면을 두 번 누르면 전체 화면</small></div>
 <div id="results" class="overlay hidden">
   <h2>게임 종료</h2>
   <div class="sub">최종 순위</div>
@@ -324,6 +334,6 @@ body.touch #knob{width:52px;height:52px;margin:-26px 0 0 -26px}
   <button id="resBtn">닫기</button>
 </div>
 
-<script type="module" src="./game.js?v=4"></script>
+<script type="module" src="./game.js?v=5"></script>
 </body>
 </html>

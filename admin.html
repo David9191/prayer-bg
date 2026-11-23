@@ -40,7 +40,7 @@ header .tag{font-family:'Teko';letter-spacing:.2em;color:var(--y);font-size:18px
 #counts b{display:block;font-family:'Teko';font-size:38px;line-height:1;color:var(--y)}
 #counts span{font-size:12px;color:#bbb}
 .btn{flex:none;padding:12px;font-size:17px;color:#111;background:#ddd}
-.btn.go{background:#3ecf6a}.btn.stop{background:#ff6b5b;color:#fff}.btn.reset{background:#4aa3df;color:#fff}
+.btn.go{background:#3ecf6a}.btn.stop{background:#ff6b5b;color:#fff}.btn.reset{background:#4aa3df;color:#fff}.btn.drop{background:#e8352a;color:#fff}.btn.watch{background:#f2a900}
 .btn:disabled{opacity:.35;cursor:default}
 #mapWrap{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
 #map{max-width:100%;max-height:100%;aspect-ratio:1;background:#2b5a6e}
@@ -96,6 +96,8 @@ td .mini:hover{color:#fff;border-color:#fff}
     <button class="btn reset" id="bReset">새 판 · 대기실 열기</button>
     <button class="btn go" id="bStart">게임 시작</button>
     <button class="btn stop" id="bEnd">게임 종료</button>
+    <button class="btn drop" id="bDrop">🪂 보급 투하 (0/3)</button>
+    <button class="btn watch" id="bWatch">🏆 시상대 화면 열기</button>
   </section>
   <section class="panel">
     <h3>전체 지도 · 플레이어 위치</h3>
@@ -115,6 +117,6 @@ td .mini:hover{color:#fff;border-color:#fff}
     </div>
   </section>
 </div>
-<script type="module" src="./admin.js?v=5"></script>
+<script type="module" src="./admin.js?v=6"></script>
 </body>
 </html>

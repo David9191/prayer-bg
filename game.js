@@ -1900,6 +1900,9 @@ function sfx(kind) {
   else if (kind === 'genie') { tone(520, 0, 0.18, 'sawtooth', 0.05, 420); tone(400, 0.18, 0.35, 'sawtooth', 0.05, 260); }
   else if (kind === 'box') { tone(140, 0, 0.12, 'square', 0.07, 90); }
   else if (kind === 'info') { tone(500, 0, 0.1, 'sine', 0.06); }
+  else if (kind === 'drop') { tone(300, 0, 0.5, 'sawtooth', 0.05, 900); tone(900, 0.5, 0.3, 'triangle', 0.08); }
+  else if (kind === 'whoosh') { tone(900, 0, 0.6, 'sawtooth', 0.025, 200); }
+  else if (kind === 'chute') { tone(120, 0, 0.25, 'square', 0.06, 60); }
   else if (kind === 'amen') { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, 0.5, 'triangle', 0.1)); }
 }
 
@@ -1938,10 +1941,10 @@ function renderSlots() {
   $('cnt').textContent = state.found.length;
 }
 function players() {
-  if (!NET.ok || !NET.joined) return [{ nick: state.nick, cleared: state.cleared, time: state.clearTime, count: state.found.length, last: 0, me: true }];
+  if (!NET.ok || (!NET.joined && !WATCH)) return [{ nick: state.nick, cleared: state.cleared, time: state.clearTime, count: state.found.length, last: 0, me: true }];
   const list = Object.entries(NET.players).filter(([, p]) => p && p.round === NET.round).map(([uid, p]) => ({ nick: p.nick, cleared: !!p.cleared, time: clearMsOf(p), count: p.count || 0, last: p.lastAt || 0, me: uid === NET.uid, online: p.online }));
   const me = list.find((p) => p.me); if (me) { me.count = state.found.length; me.cleared = state.cleared; if (state.cleared && !isFinite(me.time)) me.time = state.clearTime; }
-  else list.push({ nick: state.nick, cleared: state.cleared, time: state.clearTime, count: state.found.length, last: 0, me: true });
+  else if (!WATCH) list.push({ nick: state.nick, cleared: state.cleared, time: state.clearTime, count: state.found.length, last: 0, me: true });
   return list;
 }
 // 순위: ① 클리어 여부 → ② 클리어 시간 → ③ 찾은 조각 수 (같으면 먼저 찾은 사람)
@@ -2003,6 +2006,8 @@ function drawMinimap() {
   mctx.save(); mctx.translate(W / 2, W / 2); mctx.rotate(-cam.yaw);
   const fg = mctx.createRadialGradient(0, 0, 0, 0, 0, 60); fg.addColorStop(0, 'rgba(255,255,255,.28)'); fg.addColorStop(1, 'rgba(255,255,255,0)');
   mctx.fillStyle = fg; mctx.beginPath(); mctx.moveTo(0, 0); mctx.arc(0, 0, 60, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55); mctx.closePath(); mctx.fill(); mctx.restore();
+  const mk = (x, z) => [(x - P.x) * k + W / 2, (z - P.z) * k + W / 2];
+  drawPlanePath(mctx, mk, 1.5); drawDropMarks(mctx, mk, 7);
   drawArrow(mctx, W / 2, W / 2, -P.charYaw, 8);
 }
 const bigmap = $('bigmap'), bctx = bigmap.getContext('2d');
@@ -2024,6 +2029,8 @@ function drawBigMap() {
   }
   bctx.font = `italic ${Math.round(S / 46)}px "Noto Sans KR"`; bctx.fillStyle = '#cfe6f2'; bctx.strokeStyle = 'rgba(0,0,0,.5)'; bctx.lineWidth = 3;
   bctx.strokeText('요단강', (-200 + HALF) * k, (225 + HALF) * k); bctx.fillText('요단강', (-200 + HALF) * k, (225 + HALF) * k);
+  const bk = (x, z) => [(x + HALF) * k, (z + HALF) * k];
+  drawPlanePath(bctx, bk, 2); drawDropMarks(bctx, bk, 10);
   drawArrow(bctx, (P.x + HALF) * k, (P.z + HALF) * k, -P.charYaw, 11);
 }
 
@@ -2031,6 +2038,7 @@ function drawBigMap() {
 let nearest = null;
 function hideItem(it) { it.active = false; scene.remove(it.obj.g); }
 function interact(it) {
+  if (it && it.type === 'drop') return openDrop(it);
   if (!it || state.cleared || state.inLobby) return;
   if (it.type === 'box') {
     if (it.opened) return;
@@ -2111,6 +2119,7 @@ const FB_CONFIG = {
 const FBV = '10.14.1';
 const NET = { ok: false, fb: null, db: null, uid: null, offset: 0, room: null, phase: 'none', round: 0, startAt: 0, players: {}, remotes: new Map(), joined: false, joinAt: 0, sendT: 0, lastSent: '', kickSeen: 0 };
 const serverNow = () => Date.now() + NET.offset;
+const WATCH = new URLSearchParams(location.search).has('watch');
 async function initNet() {
   try {
     const [app, auth, db] = await Promise.all([
@@ -2129,6 +2138,7 @@ async function initNet() {
     db.onValue(db.child(NET.room, 'players'), (snap) => { NET.players = snap.val() || {}; onPlayers(); });
     const posRef = db.child(NET.room, 'pos');
     db.onChildAdded(posRef, (sn) => onPos(sn.key, sn.val())); db.onChildChanged(posRef, (sn) => onPos(sn.key, sn.val())); db.onChildRemoved(posRef, (sn) => removeRemote(sn.key));
+    db.onValue(db.child(NET.room, 'drops'), (snap) => syncDrops(snap.val()));
     db.onValue(db.child(NET.room, 'kick/' + NET.uid), (snap) => { const v = snap.val(); if (v && NET.joined && v > NET.joinAt) kicked(); });
     NET.ok = true;
     return true;
@@ -2172,29 +2182,39 @@ window.PBG_MAP = () => mapCanvas.toDataURL('image/jpeg', 0.85);
 function resetProgress() {
   state.next = 1; state.found = []; state.mistakes = Array(9).fill(0); state.genie = 0; state.boxes = 0;
   state.cleared = false; state.amenReady = false; state.halfAnnounced = false; state.clearTime = 0;
-  for (const it of items) { if (it.fromBox) { it.active = false; if (it.obj) it.obj.visible = false; continue; } if (it.type === 'box') { it.opened = false; it.openAnim = undefined; } if (!it.active && it.obj) { it.active = true; it.obj.visible = true; } }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.fromBox) { scene.remove(it.obj.g); items.splice(i, 1); continue; }
+    if (it.type === 'drop') { it.opened = false; it.obj.lid.rotation.x = 0; continue; }
+    if (it.type === 'box') { it.opened = false; it.openAnim = undefined; it.obj.hinge.rotation.x = 0; }
+    if (!it.active && it.obj) { it.active = true; scene.add(it.obj.g); }
+  }
+  P.car = null; if (P.mode === 'drive') P.mode = 'walk'; for (const c of CARS3) resetCar(c);
   $('amen').classList.add('hidden'); $('win').classList.add('hidden'); ui.pauseBlocked = false;
   if (state.playing) { renderSlots(); renderRank(); }
 }
 function onRoomState(st) {
   const prevPhase = NET.phase, prevRound = NET.round;
-  NET.phase = st.phase || 'lobby'; NET.round = st.round || 0; NET.startAt = st.startAt || 0;
-  if (!NET.joined) { updateLobbyBar(); return; }
+  NET.phase = st.phase || 'lobby'; NET.round = st.round || 0; NET.startAt = st.startAt || 0; NET.plane = st.plane || null;
+  if (!NET.joined) { updateLobbyBar(); if (WATCH && dropsReady && NET.phase !== prevPhase) watchPhase(); return; }
   if (NET.round !== prevRound) { resetProgress(); writeMyNode(); }
   if (NET.phase !== prevPhase || NET.round !== prevRound) enterPhase(NET.phase, prevPhase);
   updateLobbyBar();
 }
 function enterPhase(ph, prev) {
   $('results').classList.add('hidden');
+  if (ph !== 'ended') leavePodium();
   if (ph === 'lobby') {
-    state.inLobby = true; const s = lobbySpawn(); P.x = s.x; P.z = s.z; P.y = s.y; P.vy = 0;
+    state.inLobby = true; P.mode = 'walk'; P.car = null; const s = lobbySpawn(); P.x = s.x; P.z = s.z; P.y = s.y; P.vy = 0;
     $('bottom').classList.add('lobbyHide');
   } else if (ph === 'playing') {
     const wasLobby = state.inLobby; state.inLobby = false; $('bottom').classList.remove('lobbyHide');
     state.startTime = performance.now() - Math.max(0, serverNow() - NET.startAt);
-    if (wasLobby || prev === 'ended' || prev === 'none') { const s = randomSpawn(); P.x = s.x; P.z = s.z; P.y = s.y; P.vy = 0; P.charYaw = Math.random() * 6.28; cam.yaw = P.charYaw; updateGrass(true); }
-    if (prev === 'lobby') toast('게임 시작! 주기도문 조각을 순서대로 찾으세요', 'warn', 2600);
-  } else if (ph === 'ended') { state.inLobby = false; showResults(); }
+    if (wasLobby || prev === 'ended' || prev === 'none') {
+      if (planeBoardable()) boardPlane();
+      else { P.mode = 'walk'; const s = randomSpawn(); P.x = s.x; P.z = s.z; P.y = s.y; P.vy = 0; P.charYaw = Math.random() * 6.28; cam.yaw = P.charYaw; updateGrass(true); if (prev === 'lobby') toast('게임 시작! 주기도문 조각을 순서대로 찾으세요', 'warn', 2600); }
+    }
+  } else if (ph === 'ended') { state.inLobby = false; enterPodium(); }
   renderSlots(); renderRank();
 }
 function updateLobbyBar() {
@@ -2205,6 +2225,7 @@ function updateLobbyBar() {
 }
 function onPlayers() {
   renderRank(); updateLobbyBar();
+  if (state.podium) { buildPodium(); if (!$('results').classList.contains('hidden')) showResults(); }
   for (const [uid, r] of NET.remotes) { const p = NET.players[uid]; if (r.label) r.label.visible = !!p && NET.phase === 'lobby'; if (p && r.nick !== p.nick) setRemoteNick(r, p.nick); }
 }
 function kicked() {
@@ -2229,24 +2250,34 @@ function onPos(uid, v) {
   }
   r.tx = v.x; r.ty = v.y; r.tz = v.z; r.tyaw = v.r; r.s = v.s; r.v = v.v; r.g = v.g; r.seen = performance.now();
 }
-function removeRemote(uid) { const r = NET.remotes.get(uid); if (!r) return; scene.remove(r.root); r.root.traverse((o) => { if (o.isMesh && o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); }); NET.remotes.delete(uid); }
+function removeRemote(uid) { const r = NET.remotes.get(uid); if (!r) return; scene.remove(r.root); if (r.car) scene.remove(r.car.g); r.root.traverse((o) => { if (o.isMesh && o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); }); NET.remotes.delete(uid); }
 const STANCES = ['stand', 'crouch', 'prone'];
 function updateRemotes(dt) {
   const k = 1 - Math.exp(-9 * dt), cx = camera.position.x, cz = camera.position.z;
   for (const r of NET.remotes.values()) {
-    r.x += (r.tx - r.x) * k; r.y += (r.ty - r.y) * k; r.z += (r.tz - r.z) * k; r.yaw = lerpAngle(r.yaw, r.tyaw, k);
-    const d2 = (r.x - cx) ** 2 + (r.z - cz) ** 2, vis = d2 < 260 * 260;
-    r.root.visible = vis; if (!vis) continue;
-    r.root.position.set(r.x, r.y, r.z); r.root.rotation.y = r.yaw;
+    const jump = Math.hypot(r.tx - r.x, r.tz - r.z) > 60; // 비행기에서 뛰어내릴 때 등은 바로 이동
+    if (jump) { r.x = r.tx; r.y = r.ty; r.z = r.tz; } else { r.x += (r.tx - r.x) * k; r.y += (r.ty - r.y) * k; r.z += (r.tz - r.z) * k; }
+    r.yaw = lerpAngle(r.yaw, r.tyaw, k);
+    const d2 = (r.x - cx) ** 2 + (r.z - cz) ** 2, s = r.s || 0, vis = d2 < 260 * 260 && s !== 3 && !state.podium;
+    r.root.visible = vis;
+    if (r.car) r.car.g.visible = vis && s === 6;
+    if (!vis) continue;
+    r.root.position.set(r.x, r.y + (s === 4 ? 0.6 : 0), r.z); r.root.rotation.y = r.yaw;
+    if (s === 6) { if (!r.car && BUGGY_TPL) r.car = makeBuggy(); if (r.car) { r.car.g.visible = true; r.car.g.position.set(r.x, r.y - SEAT_Y, r.z); r.car.g.rotation.set(0, r.yaw, 0); for (const w of r.car.wheels) w.rotation.x -= (r.v || 0) * dt / 0.42; } }
+    setChute(r.S, s === 5);
     // 멀리 있으면 애니메이션을 덜 자주 갱신
     r.acc = (r.acc || 0) + dt; if (d2 > 80 * 80 && r.acc < 0.1) continue;
-    animateGLB(r.S, r.acc, r.v || 0, STANCES[r.s] || 'stand', !!r.g, (r.v || 0) > 6); r.acc = 0;
+    if (s === 4) animateGLB(r.S, r.acc, 0, 'prone', true, false);
+    else if (s === 5) animateGLB(r.S, r.acc, 0, 'stand', false, false);
+    else if (s === 6) animateGLB(r.S, r.acc, 0, 'crouch', true, false);
+    else animateGLB(r.S, r.acc, r.v || 0, STANCES[s] || 'stand', !!r.g, (r.v || 0) > 6);
+    r.acc = 0;
   }
 }
 function sendPos(dt) {
   if (!NET.ok || !NET.joined) return;
   NET.sendT -= dt; if (NET.sendT > 0) return; NET.sendT = 0.2;
-  const v = { x: Math.round(P.x * 100) / 100, y: Math.round(P.y * 100) / 100, z: Math.round(P.z * 100) / 100, r: Math.round(P.charYaw * 100) / 100, s: STANCES.indexOf(P.stance), v: Math.round(P.speed * 10) / 10, g: P.grounded ? 1 : 0 };
+  const v = { x: Math.round(P.x * 100) / 100, y: Math.round(P.y * 100) / 100, z: Math.round(P.z * 100) / 100, r: Math.round(P.charYaw * 100) / 100, s: MODE_CODE[P.mode] ?? STANCES.indexOf(P.stance), v: Math.round(P.speed * 10) / 10, g: P.grounded ? 1 : 0 };
   const key = JSON.stringify(v), now = performance.now(); if (key === NET.lastSent && now - (NET.lastSentAt || 0) < 3000) return; NET.lastSent = key; NET.lastSentAt = now;
   NET.fb.set(NET.fb.child(NET.room, 'pos/' + NET.uid), v).catch(() => {});
 }
@@ -2262,12 +2293,16 @@ function esc(t) { return String(t || '').replace(/[&<>"']/g, (c) => ({ '&': '&am
 // ───────────────────────── 입력 ─────────────────────────
 function setStance(s) {
   if (s === P.stance) return;
+  if (s !== 'stand' && P.mode !== 'walk') return;
   const h = s === 'stand' ? 1.8 : s === 'crouch' ? 1.2 : 0.6;
   if (insideSolid(P.x, P.y + h - 0.1, P.z, 0)) return;
   P.stance = s; $('stance').textContent = s === 'stand' ? 'STAND' : s === 'crouch' ? 'CROUCH' : 'PRONE';
   $('tCrouch').classList.toggle('on', s === 'crouch'); $('tProne').classList.toggle('on', s === 'prone');
 }
 function jump() {
+  if (P.mode === 'plane') return jumpOut(false);
+  if (P.mode === 'fall') return openChute();
+  if (P.mode !== 'walk') return;
   if (P.stance !== 'stand') { setStance('stand'); return; }
   if (P.grounded) { P.vy = 5.2; P.grounded = false; AUD.wasGrounded = false; AUD.fallVy = 0; playBuf('jump', 0.22, 1.15); footstep(0.5); }
 }
@@ -2284,7 +2319,7 @@ addEventListener('keydown', (e) => {
     case 'Space': jump(); break;
     case 'KeyC': setStance(P.stance === 'crouch' ? 'stand' : 'crouch'); break;
     case 'KeyZ': setStance(P.stance === 'prone' ? 'stand' : 'prone'); break;
-    case 'KeyF': if (state.amenReady) doAmen(); else interact(nearest); break;
+    case 'KeyF': action(); break;
     case 'Enter': if (state.amenReady) doAmen(); break;
     case 'KeyV': toggleView(); break;
     case 'KeyM': toggleMap(); break;
@@ -2300,7 +2335,7 @@ addEventListener('keyup', (e) => {
 });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (cam.free) { cam.free = false; cam.freeReturn = true; } });
 const SENS = 0.0022;
-function look(dx, dy, s = SENS) { cam.yaw -= dx * s; cam.pitch = clamp(cam.pitch - dy * s, -1.25, 0.95); }
+function look(dx, dy, s = SENS) { lastLookAt = performance.now(); cam.yaw -= dx * s; cam.pitch = clamp(cam.pitch - dy * s, -1.25, 0.95); }
 addEventListener('mousemove', (e) => {
   if (!state.playing || IS_TOUCH) return;
   if (pointerLocked) look(e.movementX, e.movementY);
@@ -2361,10 +2396,393 @@ function setupTouch() {
   bind('tView', toggleView); bind('tMap', () => toggleMap()); bind('tBag', () => toggleInv());
   bind('minimap', () => toggleMap()); // 배그 모바일처럼 미니맵을 누르면 큰 지도
   bind('tMenu', () => $('pause').classList.remove('hidden'));
-  bind('tUse', () => interact(nearest));
+  bind('tUse', action);
   $('pause').querySelector('.click').textContent = '화면을 터치하면 계속합니다';
   $('mapHint').textContent = 'MAP · 화면을 누르면 닫기';
   $('amen').querySelector('small').textContent = '터치해서 아멘!';
+}
+
+// ───────────────────────── 3단계: 비행기 · 낙하산 · 버기 · 보급상자 · 시상대 ─────────────────────────
+const PLANE = { ALT: 330, SPD: 70, mesh: null, props: [] };
+const MODE_CODE = { plane: 3, fall: 4, chute: 5, drive: 6 };
+const SEAT_Y = 0.36;
+P.mode = 'walk'; P.vx = 0; P.vz = 0; P.car = null;
+let lastLookAt = 0, nearCar = null, engT = 0;
+const M3 = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0.2, ...o });
+
+// ── 비행기 ──
+function makePlanePath() {
+  const a = Math.random() * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a), o = (Math.random() - 0.5) * 700, cx = -dz * o, cz = dx * o;
+  return { ax: Math.round(cx - dx * 1350), az: Math.round(cz - dz * 1350), bx: Math.round(cx + dx * 1350), bz: Math.round(cz + dz * 1350) };
+}
+const planeOn = () => !!NET.plane && (NET.phase === 'playing' || !NET.ok);
+const planeT = () => (serverNow() - NET.startAt) / 1000;
+const overIsland = (x, z) => Math.abs(x) < 930 && Math.abs(z) < 930;
+function planeAt(t) {
+  const p = NET.plane; if (!p) return null;
+  const L = Math.hypot(p.bx - p.ax, p.bz - p.az), dx = (p.bx - p.ax) / L, dz = (p.bz - p.az) / L, s = Math.max(0, t) * PLANE.SPD;
+  return { x: p.ax + dx * s, z: p.az + dz * s, y: PLANE.ALT, yaw: Math.atan2(dx, dz), s, L, dx, dz };
+}
+// 아직 섬 위를 다 지나가지 않았으면 탑승 가능
+function planeBoardable() { if (!planeOn()) return false; const p = planeAt(planeT()); return p.s < p.L * 0.5 + 500; }
+function buildPlaneMesh() {
+  const g = new THREE.Group(), body = M3(0x5f6853, { roughness: 0.5, metalness: 0.35 }), dark = M3(0x2a2d29, { roughness: 0.7 }), glass = M3(0x1c2a38, { roughness: 0.15, metalness: 0.7 }), yel = M3(0xf2a900, { roughness: 0.5 });
+  const add = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); g.add(o); return o; };
+  add(new THREE.CylinderGeometry(2.2, 2.2, 20, 18), body, 0, 0, 0, Math.PI / 2);
+  add(new THREE.SphereGeometry(2.2, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), body, 0, 0, 10, Math.PI / 2);
+  add(new THREE.CylinderGeometry(2.2, 0.55, 9, 18), body, 0, 0.6, -14.5, Math.PI / 2);
+  add(new THREE.BoxGeometry(2.4, 0.8, 1.6), glass, 0, 1.15, 10.4, -0.5);
+  add(new THREE.BoxGeometry(34, 0.45, 4.4), body, 0, 1.3, 1.2);
+  add(new THREE.BoxGeometry(12, 0.3, 2.6), body, 0, 1.4, -17.6);
+  add(new THREE.BoxGeometry(0.35, 5.2, 3.4), body, 0, 3.6, -17.4);
+  add(new THREE.BoxGeometry(0.4, 1.2, 1.2), yel, 0, 5.6, -17.9);
+  for (const x of [-6.8, -12.2, 6.8, 12.2]) {
+    add(new THREE.CylinderGeometry(0.8, 0.7, 4, 12), dark, x, 0.9, 2.4, Math.PI / 2);
+    const pr = new THREE.Group(); pr.position.set(x, 0.9, 4.5); g.add(pr);
+    for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.9, 0.06), dark); b.position.y = 0.95; const h = new THREE.Group(); h.rotation.z = k * Math.PI / 2; h.add(b); pr.add(h); }
+    PLANE.props.push(pr);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  g.visible = false; scene.add(g); PLANE.mesh = g;
+}
+function updatePlaneVis(dt) {
+  if (!PLANE.mesh) return;
+  const p = planeOn() ? planeAt(planeT()) : null, vis = !!p && p.s <= p.L;
+  PLANE.mesh.visible = vis; if (!vis) return;
+  PLANE.mesh.position.set(p.x, p.y, p.z); PLANE.mesh.rotation.y = p.yaw;
+  for (const pr of PLANE.props) pr.rotation.z += dt * 45;
+}
+function boardPlane() {
+  P.mode = 'plane'; P.vy = 0; P.vx = P.vz = 0; P.grounded = false; P.car = null; setStance('stand');
+  cam.pitch = -0.28; const p = planeAt(planeT()); if (p) cam.yaw = p.yaw + Math.PI;
+  toast(IS_TOUCH ? '✈ 비행기 탑승! 원하는 곳에서 [뛰어내리기]를 누르세요' : '✈ 비행기 탑승! 원하는 곳에서 F 키로 뛰어내리세요', 'warn', 3400);
+}
+function jumpOut(auto) {
+  const p = planeAt(planeT());
+  if (p && !auto && !overIsland(p.x, p.z)) { toast('아직 섬 위가 아니에요!', 'bad'); return; }
+  if (p) { P.x = p.x - p.dx * 16; P.z = p.z - p.dz * 16; P.y = p.y - 5; P.vx = p.dx * 20; P.vz = p.dz * 20; }
+  P.mode = 'fall'; P.vy = -4; P.charYaw = cam.yaw; cam.pitch = -0.5;
+  playBuf('jump', 0.3, 0.7); sfx('whoosh');
+  if (auto) toast('비행기가 섬을 벗어나서 자동으로 뛰어내렸어요', 'warn', 2400);
+}
+function openChute() {
+  if (P.mode !== 'fall') return;
+  P.mode = 'chute'; playBuf('land0', 0.22, 1.7); sfx('chute');
+}
+function nearestLand(x, z) {
+  for (let r = 10; r < 900; r += 10) for (let k = 0; k < 24; k++) {
+    const a = k / 24 * Math.PI * 2, px = clamp(x + Math.cos(a) * r, -900, 900), pz = clamp(z + Math.sin(a) * r, -900, 900);
+    if (terrainH(px, pz) > 1.5 && !footprintBlocked(px, pz, 1)) return { x: px, z: pz, y: terrainH(px, pz) };
+  }
+  return randomSpawn();
+}
+function updateAir(dt, f, r, mag) {
+  const chute = P.mode === 'chute', b = cam.yaw, fx = -Math.sin(b), fz = -Math.cos(b), rx = Math.cos(b), rz = -Math.sin(b);
+  const hs = chute ? 10 : (f > 0.3 ? 30 : 18);
+  let tx = 0, tz = 0;
+  if (mag > 0.05) { const nf = f / mag, nr = r / mag; tx = (fx * nf + rx * nr) * hs * mag; tz = (fz * nf + rz * nr) * hs * mag; }
+  const kh = 1 - Math.exp(-(chute ? 1.6 : 0.8) * dt);
+  P.vx += (tx - P.vx) * kh; P.vz += (tz - P.vz) * kh;
+  const vyT = chute ? -5.5 : (f > 0.5 ? -60 : -46);
+  P.vy += (vyT - P.vy) * (1 - Math.exp(-(chute ? 2 : 0.7) * dt));
+  let nx = clamp(P.x + P.vx * dt, -960, 960), nz = clamp(P.z + P.vz * dt, -960, 960);
+  [nx, nz] = resolveXZ(nx, nz, P.y, 1.8); P.x = nx; P.z = nz; P.y += P.vy * dt;
+  P.charYaw = lerpAngle(P.charYaw, cam.yaw, 1 - Math.exp(-6 * dt));
+  if (P.mode === 'fall' && P.y - Math.max(terrainH(P.x, P.z), 0) < 120) openChute();
+  const g = groundAt(P.x, P.z, P.y);
+  if (P.y <= g) land(g);
+  P.speed = Math.hypot(P.vx, P.vz);
+}
+function land(g) {
+  P.y = g; P.mode = 'walk'; P.grounded = true; P.vy = P.vx = P.vz = 0;
+  if (terrainH(P.x, P.z) < -0.6 && g <= terrainH(P.x, P.z) + 0.01) { const s = nearestLand(P.x, P.z); P.x = s.x; P.z = s.z; P.y = s.y; toast('물에 빠져서 가까운 땅으로 옮겼어요'); }
+  playBuf('land1', 0.45); footstep(1); AUD.wasGrounded = true; AUD.fallVy = 0; cam.pitch = -0.12; updateGrass(true);
+}
+
+// ── 낙하산 ──
+let CHUTE = null;
+function chuteAssets() {
+  if (CHUTE) return CHUTE;
+  const geo = new THREE.SphereGeometry(3.4, 16, 5, 0, Math.PI * 2, 0, 1.0).toNonIndexed(); geo.scale(1, 0.5, 1);
+  const p = geo.attributes.position, col = new Float32Array(p.count * 3), cols = [new THREE.Color(0xf2a900), new THREE.Color(0xf4f4f4), new THREE.Color(0xc2361f), new THREE.Color(0xf4f4f4)];
+  for (let i = 0; i < p.count; i += 3) {
+    const cx = p.getX(i) + p.getX(i + 1) + p.getX(i + 2), cz = p.getZ(i) + p.getZ(i + 1) + p.getZ(i + 2);
+    const seg = Math.floor((Math.atan2(cz, cx) + Math.PI) / (Math.PI * 2) * 8) % 8, c = cols[seg % 4];
+    for (let k = 0; k < 3; k++) col.set([c.r, c.g, c.b], (i + k) * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeVertexNormals();
+  CHUTE = { geo, mat: new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.85 }), line: new THREE.LineBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.6 }) };
+  return CHUTE;
+}
+function makeChute(top = 5.2, target = 1.5) {
+  const A = chuteAssets(), g = new THREE.Group(), m = new THREE.Mesh(A.geo, A.mat); m.position.y = top; g.add(m);
+  const rimY = top + 3.4 * Math.cos(1) * 0.5, rimR = 3.4 * Math.sin(1), v = [];
+  for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; v.push(Math.cos(a) * rimR, rimY, Math.sin(a) * rimR, Math.cos(a) * 0.2, target, Math.sin(a) * 0.15); }
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.add(new THREE.LineSegments(lg, A.line));
+  g.visible = false; return g;
+}
+function setChute(S, on) { if (!on && !S.chute) return; if (!S.chute) { S.chute = makeChute(); S.root.add(S.chute); } S.chute.visible = on; }
+
+// ── 버기 (1인승, 길가 24대, 각자 자기 것) ──
+const CARS3 = []; let BUGGY_TPL = null;
+function buildBuggyTpl() {
+  const g = new THREE.Group(), body = M3(0xc99a2e, { roughness: 0.45, metalness: 0.3 }), frame = M3(0x1e1e1e, { roughness: 0.45, metalness: 0.6 }), tire = M3(0x141414, { roughness: 0.95, metalness: 0 }), seat = M3(0x3a3530, { roughness: 0.85 });
+  const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+  add(new THREE.BoxGeometry(1.5, 0.22, 3.0), frame, 0, 0.55, 0);
+  add(new THREE.BoxGeometry(1.35, 0.32, 0.95), body, 0, 0.78, -1.1);
+  add(new THREE.BoxGeometry(1.25, 0.42, 0.7), body, 0, 0.84, 1.15);
+  add(new THREE.BoxGeometry(0.62, 0.12, 0.62), seat, 0, 0.74, 0.15);
+  add(new THREE.BoxGeometry(0.62, 0.7, 0.12), seat, 0, 1.05, 0.5).rotation.x = 0.2;
+  const tube = (a, b) => { const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), m = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, A.distanceTo(B), 6), frame); m.position.copy(A).add(B).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()); m.castShadow = true; g.add(m); };
+  for (const sx of [-0.62, 0.62]) { tube([sx, 0.65, -0.6], [sx, 1.75, -0.2]); tube([sx, 0.65, 0.75], [sx, 1.75, 0.55]); tube([sx, 1.75, -0.2], [sx, 1.75, 0.55]); }
+  tube([-0.62, 1.75, -0.2], [0.62, 1.75, -0.2]); tube([-0.62, 1.75, 0.55], [0.62, 1.75, 0.55]);
+  const sw = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.03, 6, 14), frame); sw.position.set(0, 1.02, -0.38); sw.rotation.x = -0.9; g.add(sw);
+  const lamp = M3(0xfff3c0, { emissive: 0x997733 });
+  for (const x of [-0.45, 0.45]) add(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 10).rotateX(Math.PI / 2), lamp, x, 0.84, -1.6);
+  const wg = new THREE.CylinderGeometry(0.42, 0.42, 0.32, 14); wg.rotateZ(Math.PI / 2);
+  [[-0.86, -1.05], [0.86, -1.05], [-0.86, 1.05], [0.86, 1.05]].forEach(([x, z], i) => { const w = add(wg, tire, x, 0.42, z); w.userData.wheel = i; w.rotation.order = 'YXZ'; });
+  g.rotation.order = 'YXZ'; BUGGY_TPL = g;
+}
+function makeBuggy() { const g = BUGGY_TPL.clone(), wheels = []; g.traverse((o) => { if (o.userData.wheel !== undefined) wheels[o.userData.wheel] = o; }); scene.add(g); return { g, wheels }; }
+function placeBuggies() {
+  buildBuggyTpl();
+  const r = mulberry32(4242), cands = ROADS.filter((rd) => rd.w >= 6);
+  for (let t = 0; t < 4000 && CARS3.length < 24; t++) {
+    const rd = cands[(r() * cands.length) | 0], i = 1 + ((r() * (rd.pts.length - 2)) | 0), a = rd.pts[i - 1], b = rd.pts[i + 1];
+    const tx = b[0] - a[0], tz = b[1] - a[1], L = Math.hypot(tx, tz) || 1, side = r() < 0.5 ? -1 : 1, off = rd.w / 2 + 2.6;
+    const x = rd.pts[i][0] - tz / L * side * off, z = rd.pts[i][1] + tx / L * side * off;
+    if (terrainH(x, z) < 1.5 || riverDist(x, z) < 35 || footprintBlocked(x, z, 2.2) || Math.abs(x) > 900 || Math.abs(z) > 900) continue;
+    let ok = true; forCircles(x, z, (c) => { if (Math.hypot(c.x - x, c.z - z) < c.r + 2) ok = false; }); if (!ok) continue;
+    if (CARS3.some((c) => Math.hypot(c.hx - x, c.hz - z) < 110)) continue;
+    const c = { hx: x, hz: z, hyaw: Math.atan2(-tx, -tz) + (r() - 0.5) * 0.3, v: 0, vy: 0, steer: 0, ...makeBuggy() };
+    resetCar(c); CARS3.push(c);
+  }
+}
+function resetCar(c) { c.x = c.hx; c.z = c.hz; c.yaw = c.hyaw; c.v = 0; c.vy = 0; c.y = groundAt(c.x, c.z, terrainH(c.x, c.z) + 1); poseCar(c, 0); }
+function poseCar(c, dt) {
+  const s = Math.sin(c.yaw), co = Math.cos(c.yaw), th = terrainH(c.x, c.z);
+  let pitch = 0, roll = 0;
+  if (c.y - th < 0.3) {
+    const hF = terrainH(c.x - s * 1.1, c.z - co * 1.1), hB = terrainH(c.x + s * 1.1, c.z + co * 1.1), hR = terrainH(c.x + co * 0.85, c.z - s * 0.85), hL = terrainH(c.x - co * 0.85, c.z + s * 0.85);
+    pitch = Math.atan2(hF - hB, 2.2); roll = Math.atan2(hR - hL, 1.7);
+  }
+  c.g.position.set(c.x, c.y, c.z); c.g.rotation.set(pitch, c.yaw, roll);
+  for (let i = 0; i < 4; i++) { const w = c.wheels[i]; w.rotation.x -= c.v * dt / 0.42; w.rotation.y = i < 2 ? c.steer * 0.45 : 0; }
+}
+function enterCar(c) {
+  setStance('stand'); P.mode = 'drive'; P.car = c; c.v = 0; P.vy = 0;
+  toast(IS_TOUCH ? '🚙 버기 탑승 · 조이스틱으로 운전, [내리기]로 하차' : '🚙 버기 탑승 · W/S 가속·후진, A/D 방향, F 내리기', '', 2600);
+}
+function exitCar() {
+  const c = P.car; if (!c) return;
+  if (Math.abs(c.v) > 9) { toast('너무 빨라요! 속도를 줄이고 내리세요', 'warn'); return; }
+  let placed = false;
+  for (const side of [-1, 1]) {
+    const x = c.x + Math.cos(c.yaw) * 1.6 * side, z = c.z - Math.sin(c.yaw) * 1.6 * side, g = groundAt(x, z, c.y + 1);
+    if (!insideSolid(x, g + 1, z, 0.3) && terrainH(x, z) > -0.6) { P.x = x; P.z = z; P.y = g; placed = true; break; }
+  }
+  if (!placed) { P.x = c.x; P.z = c.z; P.y = c.y + 1.2; }
+  P.mode = 'walk'; P.car = null; c.v = 0; P.vy = 0; P.grounded = false;
+}
+function updateDrive(dt, f, r, sprint) {
+  const c = P.car; let a;
+  if (f > 0.1) a = (c.v < -0.3 ? 18 : 8.5) * f;
+  else if (f < -0.1) a = (c.v > 0.3 ? -18 : -5) * -f;
+  else a = -Math.sign(c.v) * Math.min(Math.abs(c.v) / dt, 3.5);
+  c.v = clamp(c.v + a * dt, -7, sprint ? 26 : 21);
+  c.steer += (-r - c.steer) * (1 - Math.exp(-8 * dt));
+  c.yaw += c.steer * 1.6 * clamp(Math.abs(c.v) / 5, 0, 1) * Math.sign(c.v) * (1 - 0.35 * clamp(Math.abs(c.v) / 26, 0, 1)) * dt;
+  const nx = c.x - Math.sin(c.yaw) * c.v * dt, nz = c.z - Math.cos(c.yaw) * c.v * dt, dir = Math.sign(c.v) || 1;
+  let blocked = Math.abs(nx) > 960 || Math.abs(nz) > 960 || (terrainH(nx, nz) < -0.4 && !onBridge(nx, nz));
+  if (!blocked) {
+    const fx = nx - Math.sin(c.yaw) * 1.45 * dir, fz = nz - Math.cos(c.yaw) * 1.45 * dir;
+    if (insideSolid(fx, c.y + 0.9, fz, 0.35) || insideSolid(nx, c.y + 0.9, nz, 0.55)) blocked = true;
+  }
+  if (!blocked) forCircles(nx, nz, (cc) => { if (Math.hypot(cc.x - nx, cc.z - nz) < cc.r + 0.9 && c.y < cc.maxY) blocked = true; });
+  if (blocked) { if (Math.abs(c.v) > 7) { playBuf('land0', 0.4, 0.7); toast('쾅!', 'bad', 700); } c.v = -c.v * 0.25; }
+  else { c.x = nx; c.z = nz; }
+  const g = groundAt(c.x, c.z, c.y + 0.6);
+  if (c.y - g > 0.45) { c.vy -= 18 * dt; c.y += c.vy * dt; if (c.y <= g) { c.y = g; c.vy = 0; } }
+  else { c.y = g; c.vy = 0; }
+  poseCar(c, dt);
+  P.x = c.x; P.z = c.z; P.y = c.y + SEAT_Y; P.charYaw = c.yaw; P.speed = Math.abs(c.v); P.grounded = true;
+  // 마우스/화면을 잠깐 안 움직이면 카메라가 차 뒤로 돌아옴
+  if (performance.now() - lastLookAt > 1500 && Math.abs(c.v) > 2) cam.yaw = lerpAngle(cam.yaw, c.yaw, 1 - Math.exp(-2.2 * dt));
+}
+// 엔진 소리 (비행기 · 버기)
+const ENG = {};
+function engineSet(kind, v) {
+  if (!actx || !AUD.sfxGain) return;
+  if (!ENG.g) {
+    const o1 = actx.createOscillator(), o2 = actx.createOscillator(), lp = actx.createBiquadFilter(), g = actx.createGain();
+    o1.type = 'sawtooth'; o2.type = 'square'; lp.type = 'lowpass'; lp.frequency.value = 400; g.gain.value = 0;
+    o1.connect(lp); o2.connect(lp); lp.connect(g).connect(AUD.sfxGain); o1.start(); o2.start(); Object.assign(ENG, { o1, o2, lp, g });
+  }
+  const t = actx.currentTime; let gain = 0, f = 40, cut = 300;
+  if (kind === 'car') { gain = 0.05; f = 36 + v * 3.2; cut = 280 + v * 45; }
+  else if (kind === 'plane') { gain = 0.07; f = 52; cut = 240; }
+  ENG.g.gain.setTargetAtTime(gain, t, 0.2); ENG.o1.frequency.setTargetAtTime(f, t, 0.1); ENG.o2.frequency.setTargetAtTime(f * 0.505, t, 0.1); ENG.lp.frequency.setTargetAtTime(cut, t, 0.1);
+}
+
+// ── 보급상자 (관리자가 3번 투하: 꽝 · 왕관 · 꽝) ──
+const DROPS = [], DROP_H = 220, DROP_V = 9; let DROP_PTS = [], dropsReady = false;
+function chooseDropPts() {
+  const targets = [[-430, 420], [30, -300], [560, 30]], out = [];
+  for (const [tx, tz] of targets) {
+    const pts = [];
+    for (const rd of ROADS) for (let i = 1; i < rd.pts.length - 1; i++) pts.push([rd, i]);
+    pts.sort((A, B) => Math.hypot(A[0].pts[A[1]][0] - tx, A[0].pts[A[1]][1] - tz) - Math.hypot(B[0].pts[B[1]][0] - tx, B[0].pts[B[1]][1] - tz));
+    let got = null;
+    for (const [rd, i] of pts) {
+      const a = rd.pts[i - 1], b = rd.pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      for (const side of [1, -1]) {
+        const off = rd.w / 2 + 6, x = rd.pts[i][0] - (b[1] - a[1]) / L * side * off, z = rd.pts[i][1] + (b[0] - a[0]) / L * side * off;
+        if (terrainH(x, z) < 1.5 || footprintBlocked(x, z, 5) || riverDist(x, z) < 30) continue;
+        let ok = true; forCircles(x, z, (c) => { if (Math.hypot(c.x - x, c.z - z) < c.r + 3) ok = false; }); if (!ok) continue;
+        got = [Math.round(x), Math.round(z)]; break;
+      }
+      if (got) break;
+    }
+    out.push(got || [tx, tz]);
+  }
+  DROP_PTS = out; window.PBG_DROPS = out;
+}
+let SMOKE_MAT = null;
+function makeDropObj() {
+  const g = new THREE.Group(), red = M3(0xb3261e, { roughness: 0.6 }), white = M3(0xeeeeee), blue = M3(0x1d4f91, { roughness: 0.5 });
+  const add = (geo, m, y, p = g) => { const o = new THREE.Mesh(geo, m); o.position.y = y; o.castShadow = true; p.add(o); return o; };
+  add(new THREE.BoxGeometry(1.4, 1.0, 1.4), red, 0.5); add(new THREE.BoxGeometry(1.43, 0.12, 1.43), white, 0.22); add(new THREE.BoxGeometry(1.43, 0.12, 1.43), white, 0.8);
+  const lid = new THREE.Group(); lid.position.set(0, 1.0, -0.72); g.add(lid);
+  const lm = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.14, 1.48), blue); lm.position.set(0, 0.07, 0.72); lm.castShadow = true; lid.add(lm);
+  const chute = makeChute(5.6, 1.1); chute.visible = true; g.add(chute);
+  if (!SMOKE_MAT) SMOKE_MAT = new THREE.SpriteMaterial({ map: glowTexture('rgba(255,90,70,.95)', 'rgba(230,60,40,.45)'), transparent: true, depthWrite: false });
+  const smoke = new THREE.Group(); smoke.visible = false; g.add(smoke);
+  for (let i = 0; i < 9; i++) { const sp = new THREE.Sprite(SMOKE_MAT.clone()); sp.userData.k = i / 9; smoke.add(sp); }
+  scene.add(g); return { g, lid, chute, smoke };
+}
+function syncDrops(v) {
+  NET.drops = v || {}; if (!dropsReady) return;
+  for (let i = DROPS.length - 1; i >= 0; i--) {
+    const d = DROPS[i]; if (NET.drops[d.n]) continue;
+    scene.remove(d.obj.g); d.active = false; const k = items.indexOf(d); if (k >= 0) items.splice(k, 1); DROPS.splice(i, 1);
+  }
+  for (const k in NET.drops) { const n = +k, val = NET.drops[k]; if (val && val.at && !DROPS.some((d) => d.n === n)) addDrop(n, val.at); }
+}
+function addDrop(n, at) {
+  const [x, z] = DROP_PTS[(n - 1) % DROP_PTS.length] || [0, 0], y = terrainH(x, z);
+  const it = { type: 'drop', n, x, y, z, at, active: true, landed: false, opened: false, phase: 0, obj: makeDropObj() };
+  items.push(it); DROPS.push(it);
+  if ((serverNow() - at) / 1000 < 5 && state.playing) { toast(`🪂 보급상자 ${n}번 투하! 지도의 빨간 표시를 찾아가세요`, 'warn', 3400); sfx('drop'); }
+}
+function updateDrops(dt) {
+  const t = performance.now() / 1000;
+  for (const d of DROPS) {
+    const age = (serverNow() - d.at) / 1000, h = Math.max(0, DROP_H - age * DROP_V), o = d.obj;
+    o.g.position.set(d.x, d.y + h, d.z);
+    if (h > 0) { o.chute.rotation.z = Math.sin(age * 0.9) * 0.06; o.g.rotation.y = age * 0.15; }
+    else if (!d.landed) { d.landed = true; o.chute.visible = false; o.smoke.visible = true; }
+    if (d.landed) for (const sp of o.smoke.children) { const u = (t * 0.22 + sp.userData.k) % 1; sp.position.set(Math.sin(u * 6 + sp.userData.k * 9) * u * 1.5, 1 + u * 14, Math.cos(u * 5) * u); sp.scale.setScalar(1.2 + u * 5); sp.material.opacity = 0.75 * (1 - u); }
+    if (d.opened && o.lid.rotation.x > -2) o.lid.rotation.x = Math.max(-2, o.lid.rotation.x - dt * 5);
+  }
+}
+function openDrop(it) {
+  if (it.opened) return; it.opened = true; sfx('box');
+  if (it.n === 2) { state.genie++; sfx('genie'); toast('👑 왕관 발견!\n' + MSG_GENIE, 'warn', 3200); netUpdate({ genie: state.genie }); }
+  else toast('텅 비었다…! 진짜 보물은 주기도문 조각이야 😉', 'warn', 2600);
+}
+function drawDropMarks(ctx, toXY, r) {
+  for (const d of DROPS) {
+    if (d.opened) continue; const [x, y] = toXY(d.x, d.z);
+    ctx.fillStyle = '#e8352a'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.round(r * 1.2)}px "Noto Sans KR"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(d.n), x, y + 1);
+  }
+}
+function drawPlanePath(ctx, toXY, w) {
+  if (!planeOn()) return; const p = planeAt(planeT()); if (!p || p.s > p.L) return;
+  const A = toXY(NET.plane.ax, NET.plane.az), B = toXY(NET.plane.bx, NET.plane.bz), C = toXY(p.x, p.z);
+  ctx.save(); ctx.setLineDash([w * 3, w * 2]); ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); ctx.restore();
+  ctx.font = `${Math.round(w * 9)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✈', C[0], C[1]);
+}
+
+// ── 시상대 ──
+const POD = { g: null, key: '', S: [], conf: null, t: 0 };
+const POD_C = () => ({ x: LOBBY.x, y: LOBBY.y, z: LOBBY.z + 4 });
+function podTex(text, bg) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128; const x = cv.getContext('2d');
+  x.fillStyle = bg; x.fillRect(0, 0, 128, 128); x.fillStyle = '#111'; x.font = '500 120px Teko, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, 64, 74);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function buildPodium() {
+  const top = players().sort(rankSort).slice(0, 3), key = !!SOLDIER_TPL + '|' + top.map((p) => p.nick + ':' + p.count + ':' + p.time).join('|');
+  if (POD.g && POD.key === key) return;
+  removePodium(); POD.key = key; POD.t = 0;
+  const c = POD_C(), g = new THREE.Group(); g.position.set(c.x, c.y, c.z); scene.add(g); POD.g = g;
+  const H = [1.6, 1.1, 0.7], X = [0, -2.3, 2.3], col = ['#f2c230', '#c9ccd2', '#c98a4f'];
+  for (let i = 0; i < 3; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(2.1, H[i], 2.1), M3(0xf1eee7, { metalness: 0 })); m.position.set(X[i], H[i] / 2, 0); m.castShadow = m.receiveShadow = true; g.add(m);
+    const tp = new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.08, 2.14), M3(new THREE.Color(col[i]).getHex(), { metalness: 0.5, roughness: 0.35 })); tp.position.set(X[i], H[i], 0); g.add(tp);
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.9, Math.min(0.9, H[i] - 0.15)), new THREE.MeshBasicMaterial({ map: podTex(String(i + 1), col[i]) })); pl.position.set(X[i], H[i] / 2, 1.06); g.add(pl);
+    const p = top[i]; if (!p || !SOLDIER_TPL) continue;
+    const S = soldierFromTpl(SOLDIER_TPL.scene); g.add(S.root); S.root.position.set(X[i], H[i] + 0.04, 0); S.root.rotation.y = Math.PI; S.baseY = H[i] + 0.04; S.rank = i;
+    const nk = makeNickSprite(p.nick); nk.position.y = 2.3; S.root.add(nk);
+    const rec = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(p.cleared ? fmtTime(p.time) : `${p.count}/8`, { size: 50, accent: col[i] }), depthWrite: false, transparent: true })); rec.scale.set(1.4, 0.61, 1); rec.position.y = 3.05; S.root.add(rec);
+    POD.S.push(S);
+  }
+  // 색종이
+  const N = 420, cm = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.13, 0.08), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), N), cc = new THREE.Color(), pal = [0xf2a900, 0xe8352a, 0x2e86de, 0x3ecf6a, 0xffffff, 0xc56cf0];
+  POD.cd = [];
+  for (let i = 0; i < N; i++) { cm.setColorAt(i, cc.setHex(pal[i % pal.length])); POD.cd.push({ x: (Math.random() - 0.5) * 12, y: Math.random() * 9, z: (Math.random() - 0.5) * 8, s: 0.6 + Math.random() * 0.9, r: Math.random() * 6, w: 2 + Math.random() * 4 }); }
+  cm.frustumCulled = false; g.add(cm); POD.conf = cm;
+}
+function removePodium() {
+  if (!POD.g) return;
+  scene.remove(POD.g); POD.g.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh && o.geometry) o.geometry.dispose(); });
+  POD.g = null; POD.S = []; POD.conf = null; POD.key = '';
+}
+const _pm = new THREE.Matrix4(), _pq = new THREE.Quaternion(), _pe = new THREE.Euler(), _pv = new THREE.Vector3(), _ps = new THREE.Vector3(1, 1, 1);
+function updatePodium(dt) {
+  if (!POD.g) return; POD.t += dt;
+  for (const S of POD.S) { animateGLB(S, dt, 0, 'stand', true, false); if (S.rank === 0) S.root.position.y = S.baseY + Math.abs(Math.sin(POD.t * 3.2)) * 0.28; }
+  if (POD.conf) { for (let i = 0; i < POD.cd.length; i++) { const d = POD.cd[i]; d.y -= d.s * dt; if (d.y < 0) d.y += 9; d.r += d.w * dt; _pv.set(d.x + Math.sin(d.r * 0.5) * 0.3, d.y, d.z); _pq.setFromEuler(_pe.set(d.r, d.r * 0.7, 0)); POD.conf.setMatrixAt(i, _pm.compose(_pv, _pq, _ps)); } POD.conf.instanceMatrix.needsUpdate = true; }
+  const c = POD_C(), a = Math.sin(POD.t * 0.25) * 0.55;
+  camera.position.set(c.x + Math.sin(a) * 10, c.y + 3.4, c.z + Math.cos(a) * 10); camera.lookAt(c.x, c.y + 1.8, c.z);
+  sun.position.set(c.x + sunDir.x * 200, c.y + sunDir.y * 200, c.z + sunDir.z * 200); sun.target.position.set(c.x, c.y, c.z);
+  soldier.root.visible = false;
+}
+function enterPodium() {
+  state.podium = true; P.car = null; if (P.mode !== 'walk') { P.mode = 'walk'; }
+  setChute(soldier, false); buildPodium(); showResults(); $('results').classList.add('podium');
+}
+function leavePodium() { state.podium = false; removePodium(); $('results').classList.remove('podium'); }
+
+// ── 관전 모드 (?watch): 대기실 → 비행기 → 섬 전경 → 시상대 ──
+function watchPhase() {
+  if (NET.phase === 'ended') enterPodium();
+  else { leavePodium(); $('results').classList.add('hidden'); }
+}
+function watchCam(dt) {
+  const t = performance.now() / 1000;
+  if (state.podium) { updatePodium(dt); return; }
+  if (NET.phase === 'lobby') {
+    const a = t * 0.12; camera.position.set(LOBBY.x + Math.cos(a) * 34, LOBBY.y + 16, LOBBY.z + Math.sin(a) * 34); camera.lookAt(LOBBY.x, LOBBY.y + 1, LOBBY.z);
+  } else if (planeOn() && planeAt(planeT()).s < planeAt(planeT()).L) {
+    const p = planeAt(planeT()); camera.position.set(p.x - p.dx * 60 + p.dz * 25, p.y + 18, p.z - p.dz * 60 - p.dx * 25); camera.lookAt(p.x, p.y, p.z);
+  } else {
+    const a = t * 0.04; camera.position.set(Math.cos(a) * 520, 230, Math.sin(a) * 520); camera.lookAt(0, 70, 0);
+  }
+  sun.position.set(camera.position.x + sunDir.x * 200, sunDir.y * 200, camera.position.z + sunDir.z * 200); sun.target.position.set(camera.position.x, 0, camera.position.z);
+}
+
+// ── F 키 / 사용 버튼 ──
+function action() {
+  if (state.podium) return;
+  if (P.mode === 'plane') return jumpOut(false);
+  if (P.mode === 'fall') return openChute();
+  if (P.mode === 'chute') return;
+  if (P.mode === 'drive') return exitCar();
+  if (state.amenReady) return doAmen();
+  if (nearest) return interact(nearest);
+  if (nearCar && !state.inLobby) return enterCar(nearCar);
 }
 
 // ───────────────────────── 물리 · 카메라 ─────────────────────────
@@ -2378,49 +2796,73 @@ function update(dt) {
   const busy = ui.map || ui.inv || state.amenReady || !$('win').classList.contains('hidden') || !$('results').classList.contains('hidden');
   if (busy && !IS_TOUCH) { f = 0; r = 0; }
   const mag = Math.min(1, Math.hypot(f, r));
-  let spd = 0;
-  if (mag > 0.05) {
-    if (P.stance === 'prone') spd = 1.2; else if (P.stance === 'crouch') spd = walk ? 1.4 : 2.7;
-    else spd = walk ? 1.9 : sprint ? 6.6 : 4.8;
-    if (!P.grounded) spd *= 0.9;
+  engT -= dt; if (engT < 0) { engT = 0.1; engineSet(P.mode === 'drive' ? 'car' : P.mode === 'plane' ? 'plane' : 'off', P.speed); }
+  // 비행기 탑승 중
+  if (P.mode === 'plane') {
+    const p = planeOn() ? planeAt(planeT()) : null;
+    if (!p) { const s = randomSpawn(); P.x = s.x; P.z = s.z; P.y = s.y; P.mode = 'walk'; }
+    else if (p.s > p.L || (p.s > p.L * 0.5 && !overIsland(p.x, p.z))) jumpOut(true);
+    else { P.x = p.x; P.z = p.z; P.y = p.y; }
+    if (P.mode === 'plane') {
+      soldier.root.visible = false;
+      lookDir.set(-Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), -Math.cos(cam.yaw) * Math.cos(cam.pitch));
+      camera.position.set(P.x, P.y + 5, P.z).addScaledVector(lookDir, -50); camera.lookAt(P.x, P.y + 2, P.z);
+      sunFollow(); nearest = null; nearCar = null; updatePrompt(); return;
+    }
   }
-  const basis = cam.free ? P.charYaw : cam.yaw;
-  const fx = -Math.sin(basis), fz = -Math.cos(basis), rx = Math.cos(basis), rz = -Math.sin(basis);
-  let mx = 0, mz = 0;
-  if (mag > 0.05) { const nf = f / Math.max(mag, 1e-6), nr = r / Math.max(mag, 1e-6); mx = (fx * nf + rx * nr) * spd; mz = (fz * nf + rz * nr) * spd; }
-  P.speed = lerp(P.speed, spd, 1 - Math.exp(-10 * dt));
-  if (mag > 0.05 && !cam.free) P.charYaw = lerpAngle(P.charYaw, cam.yaw, 1 - Math.exp(-14 * dt));
-  const h = stanceH();
-  let nx = P.x + mx * dt, nz = P.z + mz * dt;
-  [nx, nz] = resolveXZ(nx, nz, P.y, h);
-  nx = clamp(nx, -HALF + 20, HALF - 20); nz = clamp(nz, -HALF + 20, HALF - 20);
-  const gNew = groundAt(nx, nz, P.y);
-  if (gNew > -0.7) { P.x = nx; P.z = nz; }
-  // 수직
-  const g = groundAt(P.x, P.z, P.y);
-  P.vy -= 18 * dt; P.y += P.vy * dt;
-  if (P.y <= g) { P.y = g; P.vy = 0; P.grounded = true; }
-  else if (P.grounded && P.y - g < 0.35 && P.vy <= 0) { P.y = g; P.vy = 0; }
-  else P.grounded = false;
+  if (P.mode === 'fall' || P.mode === 'chute') updateAir(dt, f, r, mag);
+  else if (P.mode === 'drive') updateDrive(dt, f, r, sprint);
+  else {
+    let spd = 0;
+    if (mag > 0.05) {
+      if (P.stance === 'prone') spd = 1.2; else if (P.stance === 'crouch') spd = walk ? 1.4 : 2.7;
+      else spd = walk ? 1.9 : sprint ? 6.6 : 4.8;
+      if (!P.grounded) spd *= 0.9;
+    }
+    const basis = cam.free ? P.charYaw : cam.yaw;
+    const fx = -Math.sin(basis), fz = -Math.cos(basis), rx = Math.cos(basis), rz = -Math.sin(basis);
+    let mx = 0, mz = 0;
+    if (mag > 0.05) { const nf = f / Math.max(mag, 1e-6), nr = r / Math.max(mag, 1e-6); mx = (fx * nf + rx * nr) * spd; mz = (fz * nf + rz * nr) * spd; }
+    P.speed = lerp(P.speed, spd, 1 - Math.exp(-10 * dt));
+    if (mag > 0.05 && !cam.free) P.charYaw = lerpAngle(P.charYaw, cam.yaw, 1 - Math.exp(-14 * dt));
+    const h = stanceH();
+    let nx = P.x + mx * dt, nz = P.z + mz * dt;
+    [nx, nz] = resolveXZ(nx, nz, P.y, h);
+    for (const c of CARS3) { const dx = nx - c.x, dz = nz - c.z, d = Math.hypot(dx, dz); if (d < 1.5 && d > 1e-3 && P.y < c.y + 1.3) { nx = c.x + dx / d * 1.5; nz = c.z + dz / d * 1.5; } }
+    nx = clamp(nx, -HALF + 20, HALF - 20); nz = clamp(nz, -HALF + 20, HALF - 20);
+    const gNew = groundAt(nx, nz, P.y);
+    if (gNew > -0.7) { P.x = nx; P.z = nz; }
+    // 수직
+    const g = groundAt(P.x, P.z, P.y);
+    P.vy -= 18 * dt; P.y += P.vy * dt;
+    if (P.y <= g) { P.y = g; P.vy = 0; P.grounded = true; }
+    else if (P.grounded && P.y - g < 0.35 && P.vy <= 0) { P.y = g; P.vy = 0; }
+    else P.grounded = false;
+  }
+  const md = P.mode, onFoot = md === 'walk';
   // 캐릭터
-  soldier.root.position.set(P.x, P.y, P.z); soldier.root.rotation.y = P.charYaw;
-  animateSoldier(soldier, dt, P.grounded ? P.speed : 0, P.stance, P.grounded, sprint && spd > 6);
-  updateSteps(dt, mag > 0.05 && P.speed > 0.5);
+  soldier.root.position.set(P.x, P.y + (md === 'fall' ? 0.6 : 0), P.z); soldier.root.rotation.y = P.charYaw;
+  if (md === 'fall') animateSoldier(soldier, dt, 0, 'prone', true, false);
+  else if (md === 'chute') animateSoldier(soldier, dt, 0, 'stand', false, false);
+  else if (md === 'drive') animateSoldier(soldier, dt, 0, 'crouch', true, false);
+  else animateSoldier(soldier, dt, P.grounded ? P.speed : 0, P.stance, P.grounded, sprint && P.speed > 6);
+  setChute(soldier, md === 'chute');
+  if (onFoot) updateSteps(dt, mag > 0.05 && P.speed > 0.5);
   // 자유 시점 복귀
   if (cam.freeReturn) { cam.yaw = lerpAngle(cam.yaw, P.charYaw, 1 - Math.exp(-10 * dt)); cam.pitch = lerp(cam.pitch, cam.savedPitch, 1 - Math.exp(-10 * dt)); if (Math.abs(cam.yaw - P.charYaw) < 0.01) cam.freeReturn = false; }
   // 카메라
-  const eyeT = P.stance === 'stand' ? 1.62 : P.stance === 'crouch' ? 1.1 : 0.45;
+  const eyeT = !onFoot ? 1.62 : P.stance === 'stand' ? 1.62 : P.stance === 'crouch' ? 1.1 : 0.45;
   P.eye = lerp(P.eye, eyeT, 1 - Math.exp(-10 * dt));
   lookDir.set(-Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), -Math.cos(cam.yaw) * Math.cos(cam.pitch));
-  if (cam.fpp) {
+  if (cam.fpp && onFoot) {
     soldier.root.visible = false;
     camera.position.set(P.x + -Math.sin(P.charYaw) * 0.12, P.y + P.eye + (P.grounded && P.speed > 0.5 ? Math.sin(soldier.phase * 2) * 0.045 : 0), P.z + -Math.cos(P.charYaw) * 0.12);
     camera.lookAt(tmpV.copy(camera.position).add(lookDir));
   } else {
     soldier.root.visible = true;
-    const rX = Math.cos(cam.yaw), rZ = -Math.sin(cam.yaw);
-    shoulder.set(P.x + rX * 0.55, P.y + P.eye + 0.22, P.z + rZ * 0.55);
-    const back = P.stance === 'prone' ? 2.6 : 3.3;
+    const rX = Math.cos(cam.yaw), rZ = -Math.sin(cam.yaw), side = onFoot ? 0.55 : 0;
+    shoulder.set(P.x + rX * side, P.y + P.eye + (md === 'drive' ? 0.7 : 0.22), P.z + rZ * side);
+    const back = md === 'drive' ? 6.2 : md === 'chute' ? 7 : md === 'fall' ? 5.5 : P.stance === 'prone' ? 2.6 : 3.3;
     let tHit = 1;
     for (let k = 1; k <= 12; k++) {
       const s = k / 12; tmpV.copy(shoulder).addScaledVector(lookDir, -back * s);
@@ -2431,13 +2873,13 @@ function update(dt) {
     const th = terrainH(camera.position.x, camera.position.z) + 0.3; if (camera.position.y < th) camera.position.y = th;
     camera.lookAt(tmpV2.copy(shoulder).addScaledVector(lookDir, 20));
   }
-  // 햇빛 그림자 따라가기
-  sun.position.set(P.x + sunDir.x * 200, P.y + sunDir.y * 200, P.z + sunDir.z * 200); sun.target.position.set(P.x, P.y, P.z);
+  sunFollow();
   // 아이템
-  nearest = null; let nd = 2.4 * 2.4; const tnow = performance.now() / 1000;
+  nearest = null; nearCar = null; let nd = 2.4 * 2.4; const tnow = performance.now() / 1000;
   for (const it of items) {
     if (!it.active) continue;
     const dx = it.x - P.x, dz = it.z - P.z, d2 = dx * dx + dz * dz, o = it.obj;
+    if (it.type === 'drop') { if (onFoot && it.landed && !it.opened && d2 < 2.8 * 2.8 && d2 < nd && Math.abs(it.y - P.y) < 2) { nd = d2; nearest = it; } continue; }
     o.g.visible = d2 < 700 * 700;
     if (it.type === 'piece') {
       o.label.visible = d2 < 170 * 170 && d2 > 3.5 * 3.5; o.beam.visible = d2 > 25 * 25 && d2 < 450 * 450;
@@ -2447,22 +2889,38 @@ function update(dt) {
     if (it.type === 'genie' && d2 < 140 * 140) o.glow.scale.setScalar(2.4 + Math.sin(tnow * 4 + it.phase) * 0.4);
     if (it.type === 'box' && it.openAnim !== undefined && it.openAnim < 1) { it.openAnim = Math.min(1, it.openAnim + dt * 3); o.hinge.rotation.x = -1.9 * it.openAnim; }
     if (it.type === 'box' && it.opened) continue;
+    if (!onFoot) continue;
     if (d2 < nd && Math.abs(it.y + 0.5 - (P.y + 0.9)) < 2.2) { nd = d2; nearest = it; }
   }
+  if (onFoot && !nearest) { let cd = 3.2 * 3.2; for (const c of CARS3) { const d2 = (c.x - P.x) ** 2 + (c.z - P.z) ** 2; if (d2 < cd && Math.abs(c.y - P.y) < 1.6) { cd = d2; nearCar = c; } } }
   updatePrompt();
   // 나무 구역 컬링
   for (const m of chunkMeshes) { const dx = m.userData.cx - P.x, dz = m.userData.cz - P.z, f = m.userData.far || (LOW ? 520 : 820); m.visible = dx * dx + dz * dz < f * f; }
 }
+// 햇빛 그림자 따라가기 (공중에서는 발밑 땅 기준)
+function sunFollow() {
+  const gy = P.mode === 'walk' || P.mode === 'drive' ? P.y : Math.max(terrainH(P.x, P.z), 0);
+  sun.position.set(P.x + sunDir.x * 200, gy + sunDir.y * 200, P.z + sunDir.z * 200); sun.target.position.set(P.x, gy, P.z);
+}
 function updatePrompt() {
   const pr = $('prompt'), tu = $('tUse');
-  if (!nearest || state.cleared || state.amenReady) { pr.classList.add('hidden'); tu.classList.add('hidden'); return; }
-  let verb = '줍기', what = '';
-  if (nearest.type === 'piece') what = `주기도문 – ${PIECES[nearest.n - 1].name}`;
-  else if (nearest.type === 'genie') what = ['돈가방', '트로피', '왕관'][nearest.kind];
-  else { verb = '열기'; what = '상자'; }
+  let verb = '', what = '', tt = '';
+  if (state.podium || P.mode === 'chute') { /* 없음 */ }
+  else if (P.mode === 'plane') { verb = '뛰어내리기'; tt = '뛰어내리기'; }
+  else if (P.mode === 'fall') { verb = '낙하산 펴기'; tt = '낙하산'; }
+  else if (P.mode === 'drive') { verb = '내리기'; what = '버기'; tt = '내리기'; }
+  else if (state.amenReady) { /* 아멘 버튼이 따로 있음 */ }
+  else if (nearest && nearest.type === 'drop') { verb = '열기'; what = `보급상자 ${nearest.n}`; tt = '보급상자 열기'; }
+  else if (nearest && !state.cleared) {
+    verb = '줍기';
+    if (nearest.type === 'piece') what = `주기도문 – ${PIECES[nearest.n - 1].name}`;
+    else if (nearest.type === 'genie') what = ['돈가방', '트로피', '왕관'][nearest.kind];
+    else { verb = '열기'; what = '상자'; }
+    tt = `${verb} ${nearest.type === 'piece' ? PIECES[nearest.n - 1].name : what}`;
+  } else if (nearCar && !state.inLobby) { verb = '타기'; what = '버기'; tt = '버기 타기'; }
+  if (!verb) { pr.classList.add('hidden'); tu.classList.add('hidden'); return; }
   pr.querySelector('.verb').textContent = verb; pr.querySelector('.what').textContent = what;
-  pr.classList.remove('hidden');
-  tu.textContent = `${verb} ${nearest.type === 'piece' ? PIECES[nearest.n - 1].name : what}`; tu.classList.remove('hidden');
+  pr.classList.remove('hidden'); tu.textContent = tt; tu.classList.remove('hidden');
 }
 let zoneCheck = 0;
 function checkZone(dt) {
@@ -2503,10 +2961,10 @@ function startGame() {
       .catch((e) => { console.warn(e); $('startBtn').disabled = false; $('nickErr').textContent = '접속에 실패했어요. 다시 눌러 주세요.'; });
     return;
   }
-  // 오프라인(혼자 하기)
-  const s = randomSpawn(); P.x = s.x; P.z = s.z; P.y = s.y; P.charYaw = Math.random() * 6.28; cam.yaw = P.charYaw;
+  // 오프라인(혼자 하기): 혼자서도 비행기에서 뛰어내림
+  NET.plane = makePlanePath(); NET.startAt = serverNow();
   state.startTime = performance.now();
-  go();
+  go(); boardPlane();
 }
 $('startBtn').addEventListener('click', startGame);
 $('nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') startGame(); });
@@ -2520,10 +2978,13 @@ function loop() {
   const dt = Math.min(clock.getDelta(), 0.05);
   WIND.time.value = performance.now() / 1000;
   if (NET.remotes.size) updateRemotes(dt);
-  if (state.playing) {
-    update(dt); updateGrass(); if (!state.inLobby) checkZone(dt); drawCompass(); drawMinimap(); if (ui.map) drawBigMap();
+  updatePlaneVis(dt); if (DROPS.length) updateDrops(dt);
+  if (state.playing && state.podium) { updatePodium(dt); sendPos(dt); }
+  else if (state.playing) {
+    update(dt); if (P.mode !== 'plane' && P.y - terrainH(P.x, P.z) < 120) updateGrass(); if (!state.inLobby && P.mode !== 'plane') checkZone(dt); drawCompass(); drawMinimap(); if (ui.map) drawBigMap();
     sendPos(dt);
-  } else {
+  } else if (WATCH) watchCam(dt);
+  else {
     const t = performance.now() / 1000 * 0.04;
     camera.position.set(Math.cos(t) * 520, 230, Math.sin(t) * 520); camera.lookAt(0, 70, 0);
     sun.position.set(sunDir.x * 300, sunDir.y * 300, sunDir.z * 300); sun.target.position.set(0, 0, 0);
@@ -2556,6 +3017,7 @@ async function init() {
   buildNature(placed);
   initGrass();
   buildMapImage();
+  placeBuggies(); buildPlaneMesh(); chooseDropPts(); dropsReady = true; syncDrops(NET.drops);
   { const x = mapCanvas.getContext('2d'), k = MAPPX / SIZE; x.fillStyle = '#9a7a58'; x.fillRect((LOBBY.x - LOBBY.half + HALF) * k, (LOBBY.z - LOBBY.half + HALF) * k, LOBBY.half * 2 * k, LOBBY.half * 2 * k); }
   soldier = buildSoldier();
   try { msg.textContent = '병사 모델을 불러오는 중…'; const g = await buildSoldierGLB(); scene.remove(soldier.root); soldier = g; } catch (e) { console.warn('병사 모델 대체', e); }
@@ -2563,6 +3025,7 @@ async function init() {
   const online = await netP;
   msg.textContent = (online ? '🟢 온라인 · ' : '⚪ 혼자 하기 · ') + (IS_TOUCH ? '왼쪽 조이스틱으로 이동' : 'Esc를 누르면 조작키 안내');
   $('startBtn').disabled = false; $('startBtn').textContent = 'START';
+  if (WATCH) { $('start').classList.add('hidden'); $('watchTag').classList.remove('hidden'); document.body.classList.add('watch'); syncDrops(NET.drops); watchPhase(); addEventListener('dblclick', () => document.documentElement.requestFullscreen?.()); }
 }
 loop();
 init().catch((e) => { console.error(e); $('loadMsg').textContent = '오류: ' + e.message; });

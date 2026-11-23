@@ -19,7 +19,14 @@ const app = initializeApp(FB_CONFIG);
 const auth = getAuth(app);
 const db = getDatabase(app);
 const room = ref(db, 'rooms/main');
-let offset = 0, st = { phase: 'lobby', round: 0, startAt: 0 }, players = {}, pos = {};
+let offset = 0, st = { phase: 'lobby', round: 0, startAt: 0 }, players = {}, pos = {}, drops = {};
+// 보급상자 낙하 지점 (게임 코드가 계산한 값과 같아야 함)
+const DROP_PTS = [[-430, 420], [30, -300], [560, 30]];
+const PLANE_SPD = 70;
+function makePlanePath() {
+  const a = Math.random() * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a), o = (Math.random() - 0.5) * 700, cx = -dz * o, cz = dx * o;
+  return { ax: Math.round(cx - dx * 1350), az: Math.round(cz - dz * 1350), bx: Math.round(cx + dx * 1350), bz: Math.round(cz + dz * 1350) };
+}
 
 // ── 로그인: 비밀번호가 맞아야 admins/{uid}에 쓸 수 있음 (DB 규칙에서 검사) ──
 async function login() {
@@ -48,6 +55,7 @@ function start() {
   onValue(child(room, 'state'), (s) => { st = s.val() || { phase: 'lobby', round: 0, startAt: 0 }; renderPhase(); renderRows(); });
   onValue(child(room, 'players'), (s) => { players = s.val() || {}; renderRows(); });
   onValue(child(room, 'pos'), (s) => { pos = s.val() || {}; });
+  onValue(child(room, 'drops'), (s) => { drops = s.val() || {}; renderPhase(); });
   onChildAdded(query(child(room, 'feed'), orderByChild('at'), limitToLast(20)), (s) => { const v = s.val(); if (!v) return; const d = document.createElement('div'); d.innerHTML = v.html; $('feed').prepend(d); });
   requestAnimationFrame(drawLoop);
   setInterval(tick, 250);
@@ -57,16 +65,19 @@ function start() {
 $('bReset').onclick = async () => {
   if (st.phase === 'playing' && !confirm('진행 중인 게임을 지우고 새 판을 열까요?')) return;
   await set(child(room, 'state'), { phase: 'lobby', round: Date.now(), startAt: 0 });
-  await Promise.all(['players', 'pos', 'feed', 'kick'].map((k) => remove(child(room, k))));
+  await Promise.all(['players', 'pos', 'feed', 'kick', 'drops'].map((k) => remove(child(room, k))));
   $('feed').innerHTML = '';
 };
-$('bStart').onclick = () => update(child(room, 'state'), { phase: 'playing', startAt: serverTimestamp(), round: st.round || Date.now() });
+$('bStart').onclick = () => update(child(room, 'state'), { phase: 'playing', startAt: serverTimestamp(), round: st.round || Date.now(), plane: makePlanePath() });
+$('bDrop').onclick = () => { const n = Object.keys(drops).length + 1; if (n > 3 || st.phase !== 'playing') return; set(child(room, 'drops/' + n), { n, at: serverTimestamp() }); };
+$('bWatch').onclick = () => window.open(new URL('./?watch', location.href).href, '_blank');
 $('bEnd').onclick = () => { if (confirm('게임을 종료하고 최종 순위를 보여 줄까요?')) update(child(room, 'state'), { phase: 'ended', endAt: serverTimestamp() }); };
 
 function renderPhase() {
   const el = $('phase'), ph = st.phase;
   el.className = ph; el.textContent = ph === 'lobby' ? '대기실 · 입장 중' : ph === 'playing' ? '게임 진행 중' : ph === 'ended' ? '게임 종료' : '-';
   $('bStart').disabled = ph === 'playing'; $('bEnd').disabled = ph !== 'playing';
+  const nd = Object.keys(drops).length; $('bDrop').disabled = ph !== 'playing' || nd >= 3; $('bDrop').textContent = `🪂 보급 투하 (${nd}/3)` + (nd === 1 ? ' · 다음은 왕관' : '');
 }
 function tick() {
   const t = st.phase === 'playing' && st.startAt ? Date.now() + offset - st.startAt : st.phase === 'ended' && st.endAt && st.startAt ? st.endAt - st.startAt : 0;
@@ -119,6 +130,16 @@ function drawLoop() {
   for (let g = 0; g <= 8; g++) { const v = g * W / 8; cx.beginPath(); cx.moveTo(v, 0); cx.lineTo(v, W); cx.moveTo(0, v); cx.lineTo(W, v); cx.stroke(); }
   cx.font = '900 15px "Noto Sans KR"'; cx.textAlign = 'center';
   for (const [n, x, z] of ZONES) { cx.fillStyle = 'rgba(0,0,0,.55)'; const w = cx.measureText(n).width + 12; cx.fillRect(P(x) - w / 2, P(z) - 11, w, 20); cx.fillStyle = '#fff'; cx.fillText(n, P(x), P(z) + 4); }
+  // 비행기 경로
+  if (st.phase === 'playing' && st.plane && st.startAt) {
+    const pl = st.plane, Ln = Math.hypot(pl.bx - pl.ax, pl.bz - pl.az), s = Math.max(0, (Date.now() + offset - st.startAt) / 1000) * PLANE_SPD;
+    if (s <= Ln) {
+      cx.save(); cx.setLineDash([10, 7]); cx.strokeStyle = 'rgba(255,255,255,.85)'; cx.lineWidth = 2.5; cx.beginPath(); cx.moveTo(P(pl.ax), P(pl.az)); cx.lineTo(P(pl.bx), P(pl.bz)); cx.stroke(); cx.restore();
+      cx.font = '26px sans-serif'; cx.fillText('✈', P(pl.ax + (pl.bx - pl.ax) * s / Ln), P(pl.az + (pl.bz - pl.az) * s / Ln) + 9);
+    }
+  }
+  // 보급상자
+  for (const k in drops) { const pt = DROP_PTS[(k - 1) % 3]; if (!pt) continue; cx.fillStyle = '#e8352a'; cx.strokeStyle = '#fff'; cx.lineWidth = 2.5; cx.beginPath(); cx.arc(P(pt[0]), P(pt[1]), 11, 0, 7); cx.fill(); cx.stroke(); cx.fillStyle = '#fff'; cx.font = '900 13px "Noto Sans KR"'; cx.fillText(k, P(pt[0]), P(pt[1]) + 5); }
   const L = list(), idx = {}; L.forEach((p, i) => (idx[p.uid] = i));
   cx.font = '700 13px "Noto Sans KR"';
   for (const [uid, v] of Object.entries(pos)) {
