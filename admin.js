@@ -43,7 +43,7 @@ function start() {
   $('login').classList.add('hidden'); $('app').classList.remove('hidden');
   const url = new URL('./', location.href).href;
   $('url').textContent = url;
-  import('https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm').then((m) => { const QR = m.default || m; const c = document.createElement('canvas'); QR.toCanvas(c, url, { width: 440, margin: 1 }); $('qr').appendChild(c); }).catch(() => ($('qr').textContent = 'QR 생성 실패 — 주소를 직접 알려 주세요'));
+  import('https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm').then((m) => { const QR = m.default || m; const c = document.createElement('canvas'); QR.toCanvas(c, url, { width: 440, margin: 1 }, () => { c.style.width = c.style.height = '100%'; }); c.style.width = c.style.height = '100%'; $('qr').appendChild(c); }).catch(() => ($('qr').textContent = 'QR 생성 실패 — 주소를 직접 알려 주세요'));
   onValue(ref(db, '.info/serverTimeOffset'), (s) => (offset = s.val() || 0));
   onValue(child(room, 'state'), (s) => { st = s.val() || { phase: 'lobby', round: 0, startAt: 0 }; renderPhase(); renderRows(); });
   onValue(child(room, 'players'), (s) => { players = s.val() || {}; renderRows(); });

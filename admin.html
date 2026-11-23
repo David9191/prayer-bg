@@ -31,15 +31,15 @@ header .tag{font-family:'Teko';letter-spacing:.2em;color:var(--y);font-size:18px
 #timer{font-family:'Teko';font-size:44px;line-height:1;min-width:110px;text-align:right}
 .panel{background:var(--panel);border:1px solid var(--line);padding:14px;overflow:hidden;display:flex;flex-direction:column}
 .panel h3{font-family:'Teko';font-weight:500;font-size:20px;letter-spacing:.18em;color:#bbb;margin-bottom:8px}
-#left{gap:12px}
-#qr{background:#fff;padding:10px;align-self:center}
-#qr canvas,#qr img{display:block;width:220px;height:220px}
+#left{gap:10px;overflow:auto}
+#qr{background:#fff;padding:8px;align-self:center;width:min(200px,22vh);height:min(200px,22vh);flex:none}
+#qr canvas,#qr img{display:block;width:100%!important;height:100%!important}
 #url{font-size:13px;word-break:break-all;text-align:center;color:#ddd}
-#counts{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center}
+#counts{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center}
 #counts div{background:rgba(0,0,0,.3);padding:6px}
 #counts b{display:block;font-family:'Teko';font-size:38px;line-height:1;color:var(--y)}
 #counts span{font-size:12px;color:#bbb}
-.btn{padding:12px;font-size:17px;color:#111;background:#ddd}
+.btn{flex:none;padding:12px;font-size:17px;color:#111;background:#ddd}
 .btn.go{background:#3ecf6a}.btn.stop{background:#ff6b5b;color:#fff}.btn.reset{background:#4aa3df;color:#fff}
 .btn:disabled{opacity:.35;cursor:default}
 #mapWrap{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
@@ -115,6 +115,6 @@ td .mini:hover{color:#fff;border-color:#fff}
     </div>
   </section>
 </div>
-<script type="module" src="./admin.js?v=4"></script>
+<script type="module" src="./admin.js?v=5"></script>
 </body>
 </html>
