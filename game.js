@@ -2288,7 +2288,10 @@ function showResults() {
   const me = ps.findIndex((p) => p.me);
   $('resList').innerHTML = ps.slice(0, 10).map((p, i) => `<li class="${p.me ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="nm">${esc(p.nick)}</span><span class="rc">${p.cleared ? fmtTime(p.time) : p.count + '/8'}</span></li>`).join('');
   $('resMe').textContent = me >= 0 ? `내 순위 ${me + 1} / ${ps.length}` : '';
-  $('results').classList.remove('hidden'); if (document.pointerLockElement) document.exitPointerLock();
+  // 일시정지 · 지도 · 가방 · 클리어 화면 · F 안내를 모두 닫고 결과만 보여 줌
+  $('pause').classList.add('hidden'); $('win').classList.add('hidden'); $('amen').classList.add('hidden'); $('prompt').classList.add('hidden'); $('tUse').classList.add('hidden');
+  if (ui.map) toggleMap(false); if (ui.inv) toggleInv(false);
+  ui.pauseBlocked = true; $('results').classList.remove('hidden'); if (document.pointerLockElement) document.exitPointerLock();
 }
 function esc(t) { return String(t || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
@@ -2356,7 +2359,7 @@ function lockPointer() {
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
   if (pointerLocked) { $('pause').classList.add('hidden'); ui.pauseBlocked = false; }
-  else if (state.playing && !ui.pauseBlocked && !state.cleared && !state.amenReady) $('pause').classList.remove('hidden');
+  else if (state.playing && !ui.pauseBlocked && !state.cleared && !state.amenReady && !state.podium && $('results').classList.contains('hidden')) $('pause').classList.remove('hidden');
 });
 document.addEventListener('pointerlockerror', () => { dragLook = true; $('pause').classList.add('hidden'); });
 $('pause').addEventListener('click', () => { $('pause').classList.add('hidden'); lockPointer(); });
