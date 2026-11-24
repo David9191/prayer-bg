@@ -2359,7 +2359,7 @@ function lockPointer() {
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
   if (pointerLocked) { $('pause').classList.add('hidden'); ui.pauseBlocked = false; }
-  else if (state.playing && !ui.pauseBlocked && !state.cleared && !state.amenReady && !state.podium && $('results').classList.contains('hidden')) $('pause').classList.remove('hidden');
+  else if (state.playing && !ui.pauseBlocked && !state.cleared && !state.amenReady && !state.podium && $('results').classList.contains('hidden')) { $('pauseHome').classList.toggle('hidden', NET.phase !== 'ended'); $('pause').classList.remove('hidden'); }
 });
 document.addEventListener('pointerlockerror', () => { dragLook = true; $('pause').classList.add('hidden'); });
 $('pause').addEventListener('click', () => { $('pause').classList.add('hidden'); lockPointer(); });
@@ -2370,7 +2370,16 @@ $('winBtn').addEventListener('click', () => { $('win').classList.add('hidden'); 
 $('resBtn').addEventListener('click', () => { if (state.podium) { leavePodiumView(); return; } $('results').classList.add('hidden'); if (!IS_TOUCH) lockPointer(); });
 $('mapOv').addEventListener('click', () => toggleMap(false));
 $('inv').addEventListener('click', () => toggleInv(false));
-addEventListener('beforeunload', (e) => { if (state.playing) { e.preventDefault(); e.returnValue = ''; } });
+addEventListener('beforeunload', (e) => { if (state.playing && !state.goingHome) { e.preventDefault(); e.returnValue = ''; } });
+// 처음 화면(닉네임 입력)으로: 접속을 정리하고 새로고침
+function goHome(e) {
+  if (e) e.stopPropagation();
+  state.goingHome = true;
+  try { if (NET.ok && NET.joined) { NET.joined = false; NET.fb.update(NET.fb.child(NET.room, 'players/' + NET.uid), { online: false }); NET.fb.remove(NET.fb.child(NET.room, 'pos/' + NET.uid)); } } catch { /* 무시 */ }
+  if (document.pointerLockElement) document.exitPointerLock();
+  setTimeout(() => location.reload(), 300);
+}
+$('resHome').addEventListener('click', goHome); $('pauseHome').addEventListener('click', goHome);
 
 // 모바일 조작
 const joy = { id: null, x: 0, y: 0, f: 0, r: 0 };
